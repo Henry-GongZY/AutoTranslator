@@ -1,0 +1,23 @@
+[package]
+name = "translator-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Realtime system-audio subtitle core (phase 1: capture -> VAD -> mock ASR -> subtitles)"
+
+[dependencies]
+translator-protocol.workspace = true
+
+prost.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[[bin]]
+name = "translator-core"
+path = "src/main.rs"

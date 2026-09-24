@@ -1,0 +1,13 @@
+/target
+**/target/
+.vs/
+.vscode/
+*.user
+
+# Windows client build output
+clients/windows/**/bin/
+clients/windows/**/obj/
+clients/windows/**/*.appx
+clients/windows/**/*.msix
+
+*.log

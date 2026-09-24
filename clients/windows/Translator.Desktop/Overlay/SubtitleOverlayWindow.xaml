@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Translator.Desktop.Overlay.SubtitleOverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        The root is pure black on purpose: SetLayeredWindowAttributes uses
+        LWA_COLORKEY with black, so every black pixel becomes fully transparent
+        while the caption pill and its text stay opaque.
+    -->
+    <Grid x:Name="Root" Background="#FF000000">
+        <Border
+            x:Name="CaptionBorder"
+            Margin="0,0,0,28"
+            Padding="20,12"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="#FF141414"
+            CornerRadius="10"
+            Visibility="Collapsed">
+            <TextBlock
+                x:Name="CaptionText"
+                MaxWidth="1040"
+                FontSize="24"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </Border>
+    </Grid>
+</Window>

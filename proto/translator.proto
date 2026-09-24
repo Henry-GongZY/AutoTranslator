@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package translator.v1;
+
+option csharp_namespace = "Translator.Protocol";
+
+// ---------------------------------------------------------------------------
+// Wire protocol between the native clients and translator-core.
+//
+// Transport: Windows named pipe / Unix domain socket.
+// Framing:   4-byte big-endian length prefix + one encoded `Envelope`.
+// ---------------------------------------------------------------------------
+
+enum SampleFormat {
+  SAMPLE_FORMAT_UNSPECIFIED = 0;
+  // IEEE-754 little-endian float32.
+  SAMPLE_FORMAT_F32 = 1;
+  // Signed little-endian 16-bit PCM.
+  SAMPLE_FORMAT_I16 = 2;
+}
+
+enum SubtitleKind {
+  SUBTITLE_KIND_UNSPECIFIED = 0;
+  // Still being recognised; may be replaced by a newer partial.
+  SUBTITLE_KIND_PARTIAL = 1;
+  // Stable result; never changes again.
+  SUBTITLE_KIND_COMMITTED = 2;
+}
+
+enum CoreStatus {
+  CORE_STATUS_UNSPECIFIED = 0;
+  CORE_STATUS_IDLE = 1;
+  CORE_STATUS_LISTENING = 2;
+  CORE_STATUS_PAUSED = 3;
+  CORE_STATUS_ERROR = 4;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_BAD_REQUEST = 1;
+  ERROR_CODE_UNSUPPORTED = 2;
+  ERROR_CODE_PROTOCOL_VERSION_MISMATCH = 3;
+  ERROR_CODE_INVALID_SESSION = 4;
+  ERROR_CODE_AUDIO_FORMAT = 5;
+  ERROR_CODE_PROVIDER_FAILURE = 6;
+  ERROR_CODE_INTERNAL = 7;
+}
+
+message AudioFormat {
+  uint32 sample_rate = 1;
+  uint32 channels = 2;
+  SampleFormat format = 3;
+}
+
+message AsrConfig {
+  // "mock" in phase 1. Cloud providers land in the next iteration.
+  string provider = 1;
+  string model = 2;
+  // BCP-47 tag, empty means auto-detect.
+  string language = 3;
+}
+
+message TranslationConfig {
+  // "none" in phase 1.
+  string provider = 1;
+  string target_language = 2;
+}
+
+message SubtitleConfig {
+  // 0 means "use core default".
+  uint32 max_lines = 1;
+  uint32 max_chars_per_line = 2;
+  uint32 partial_interval_ms = 3;
+  uint32 commit_silence_ms = 4;
+}
+
+// --- Handshake -------------------------------------------------------------
+
+message HandshakeRequest {
+  uint32 protocol_version = 1;
+  string client_id = 2;
+  string client_version = 3;
+  repeated string features = 4;
+}
+
+message HandshakeResponse {
+  bool accepted = 1;
+  string server_version = 2;
+  uint32 negotiated_protocol_version = 3;
+  repeated string features = 4;
+  string error = 5;
+}
+
+// --- Session ---------------------------------------------------------------
+
+message StartSessionRequest {
+  string session_id = 1;
+  AudioFormat input_format = 2;
+  // 0 means "use core default" (16000).
+  uint32 target_sample_rate = 3;
+  AsrConfig asr = 4;
+  TranslationConfig translation = 5;
+  SubtitleConfig subtitle = 6;
+}
+
+message StartSessionResponse {
+  bool accepted = 1;
+  string session_id = 2;
+  string error = 3;
+}
+
+message StopSessionRequest {
+  string session_id = 1;
+}
+
+message StopSessionResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message SetPausedRequest {
+  string session_id = 1;
+  bool paused = 2;
+}
+
+message SetPausedResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+// --- Audio -----------------------------------------------------------------
+
+message AudioFrame {
+  string session_id = 1;
+  // Timestamp of the *end* of this chunk on the core audio clock (microseconds
+  // since session start). Informational only; the core derives its own clock
+  // from the accumulated sample count.
+  uint64 timestamp_us = 2;
+  AudioFormat format = 3;
+  // Per-channel frame count.
+  uint32 frames = 4;
+  bytes pcm = 5;
+}
+
+// --- Core -> client events -------------------------------------------------
+
+message SubtitleEvent {
+  string session_id = 1;
+  uint64 seq = 2;
+  SubtitleKind kind = 3;
+  // The line that changed.
+  string text = 4;
+  // Empty while translation is disabled.
+  string translated_text = 5;
+  string language = 6;
+  uint64 start_us = 7;
+  uint64 end_us = 8;
+  double confidence = 9;
+  // Full block that should currently be on screen: committed history plus an
+  // optional trailing partial line. The client renders this verbatim.
+  repeated string lines = 10;
+}
+
+message StatusEvent {
+  CoreStatus status = 1;
+  string detail = 2;
+  uint64 timestamp_us = 3;
+}
+
+message MetricsEvent {
+  uint64 audio_frames = 1;
+  uint64 audio_bytes = 2;
+  uint64 audio_ms = 3;
+  uint64 dropped_frames = 4;
+  double speech_ratio = 5;
+  uint64 subtitle_events = 6;
+}
+
+message ErrorEvent {
+  ErrorCode code = 1;
+  string message = 2;
+  bool fatal = 3;
+}
+
+// --- Keepalive -------------------------------------------------------------
+
+message HeartbeatRequest {
+  uint64 timestamp_us = 1;
+}
+
+message HeartbeatResponse {
+  uint64 timestamp_us = 1;
+}
+
+// --- Envelope --------------------------------------------------------------
+
+message Envelope {
+  uint32 seq = 1;
+  oneof payload {
+    HandshakeRequest handshake_request = 2;
+    HandshakeResponse handshake_response = 3;
+    StartSessionRequest start_session_request = 4;
+    StartSessionResponse start_session_response = 5;
+    StopSessionRequest stop_session_request = 6;
+    StopSessionResponse stop_session_response = 7;
+    SetPausedRequest set_paused_request = 8;
+    SetPausedResponse set_paused_response = 9;
+    AudioFrame audio_frame = 10;
+    SubtitleEvent subtitle_event = 11;
+    StatusEvent status_event = 12;
+    MetricsEvent metrics_event = 13;
+    ErrorEvent error_event = 14;
+    HeartbeatRequest heartbeat_request = 15;
+    HeartbeatResponse heartbeat_response = 16;
+  }
+}
