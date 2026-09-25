@@ -47,7 +47,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn start(request: &StartSessionRequest, mock_sentences: &[String]) -> Result<Self> {
+    pub async fn start(request: &StartSessionRequest, mock_sentences: &[String]) -> Result<Self> {
         let declared = request.input_format.clone().unwrap_or(AudioFormat {
             sample_rate: 48_000,
             channels: 2,
@@ -101,7 +101,13 @@ impl Session {
             .as_ref()
             .map(|a| a.provider.as_str())
             .unwrap_or("mock");
-        let recognizer = asr::create(provider, mock_sentences.to_vec())?;
+        let asr_cfg = request.asr.clone().unwrap_or_default();
+        let asr_opts = asr::AsrOptions {
+            sentences: mock_sentences.to_vec(),
+            model: asr_cfg.model.clone(),
+            language: asr_cfg.language.clone(),
+        };
+        let recognizer = asr::create(provider, asr_opts).await?;
 
         let subtitle_cfg = match &request.subtitle {
             Some(cfg) => SubtitleConfig {

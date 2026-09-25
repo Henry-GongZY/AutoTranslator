@@ -24,6 +24,9 @@ pub enum CoreError {
     #[error("provider failure: {0}")]
     Provider(String),
 
+    #[error("model error: {0}")]
+    Model(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -38,6 +41,7 @@ impl CoreError {
             CoreError::InvalidSession(_) => ErrorCode::InvalidSession,
             CoreError::BadRequest(_) => ErrorCode::BadRequest,
             CoreError::Provider(_) => ErrorCode::ProviderFailure,
+            CoreError::Model(_) => ErrorCode::Internal,
             CoreError::Internal(_) => ErrorCode::Internal,
         }
     }

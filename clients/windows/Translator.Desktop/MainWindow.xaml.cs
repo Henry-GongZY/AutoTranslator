@@ -36,7 +36,14 @@ public sealed partial class MainWindow : Window
             var options = new SubtitleOptions(
                 (int)Math.Round(MaxLinesBox.Value),
                 (int)Math.Round(MaxCharsBox.Value));
-            await _controller.StartAsync(options);
+            var provider = TagOf(ProviderBox) ?? "mock";
+            var language = TagOf(LanguageBox) ?? "";
+
+            // The Whisper path downloads the model and compiles kernels on the
+            // first run; run it off the UI thread so the window stays responsive.
+            // Do NOT use ConfigureAwait(false) here: the continuation touches UI
+            // elements (StopButton, PauseSwitch) and must run on the UI thread.
+            await Task.Run(() => _controller.StartAsync(options, provider, language));
 
             StopButton.IsEnabled = true;
             PauseSwitch.IsEnabled = true;
@@ -44,9 +51,18 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"启动失败：{ex.Message}";
+            DispatcherQueue.TryEnqueue(() => StatusText.Text = $"启动失败：{ex.Message}");
             StartButton.IsEnabled = true;
         }
+    }
+
+    private static string? TagOf(Microsoft.UI.Xaml.Controls.ComboBox box)
+    {
+        if (box.SelectedItem is Microsoft.UI.Xaml.Controls.ComboBoxItem item)
+        {
+            return item.Tag as string;
+        }
+        return null;
     }
 
     private async void OnStopClicked(object sender, RoutedEventArgs e)

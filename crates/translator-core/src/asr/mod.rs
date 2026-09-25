@@ -2,9 +2,32 @@
 
 pub mod mock;
 
+#[cfg(feature = "whisper")]
+pub mod whisper;
+
 use async_trait::async_trait;
 
-use crate::error::Result;
+use crate::error::{CoreError, Result};
+
+/// Options handed to an ASR provider when it is constructed.
+pub struct AsrOptions {
+    /// Rotating sentences for the mock provider.
+    pub sentences: Vec<String>,
+    /// Whisper model file name (e.g. `ggml-tiny.bin`) or an absolute path.
+    pub model: String,
+    /// Whisper language hint (e.g. `zh`, `en`); empty means auto-detect.
+    pub language: String,
+}
+
+impl Default for AsrOptions {
+    fn default() -> Self {
+        Self {
+            sentences: Vec::new(),
+            model: "ggml-tiny.bin".to_string(),
+            language: String::new(),
+        }
+    }
+}
 
 /// What a recogniser reports back to the pipeline.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,11 +69,20 @@ pub trait SpeechRecognizer: Send + Sync {
 }
 
 /// Build the recogniser named by `provider`.
-pub fn create(provider: &str, sentences: Vec<String>) -> Result<Box<dyn SpeechRecognizer>> {
+pub async fn create(provider: &str, opts: AsrOptions) -> Result<Box<dyn SpeechRecognizer>> {
     match provider {
-        "" | "mock" => Ok(Box::new(mock::MockRecognizer::new(sentences))),
-        other => Err(crate::error::CoreError::Unsupported(format!(
-            "asr provider `{other}` is not wired up in phase 1 (only `mock` is available)"
+        "" | "mock" => Ok(Box::new(mock::MockRecognizer::new(opts.sentences))),
+
+        #[cfg(feature = "whisper")]
+        "whisper" => Ok(Box::new(whisper::WhisperAsr::new(opts).await?)),
+
+        #[cfg(not(feature = "whisper"))]
+        "whisper" => Err(CoreError::Unsupported(
+            "asr provider `whisper` requires the `whisper` feature (and a CUDA/CPU build)".into(),
+        )),
+
+        other => Err(CoreError::Unsupported(format!(
+            "asr provider `{other}` is not wired up in phase 1 (only `mock` and `whisper` exist)"
         ))),
     }
 }

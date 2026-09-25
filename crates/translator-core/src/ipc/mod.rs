@@ -15,6 +15,10 @@ use crate::session::Session;
 use crate::VERSION;
 
 /// Features the phase-1 core advertises during the handshake.
+#[cfg(feature = "whisper")]
+const FEATURES: &[&str] = &["audio.pcm", "asr.mock", "asr.whisper", "translation.none"];
+
+#[cfg(not(feature = "whisper"))]
 const FEATURES: &[&str] = &["audio.pcm", "asr.mock", "translation.none"];
 
 pub struct ServeOptions {
@@ -110,7 +114,7 @@ async fn dispatch(
                 out.push(error_event(server_seq, ErrorCode::BadRequest, "handshake required", false));
                 return out;
             }
-            match Session::start(&request, &options.mock_sentences) {
+            match Session::start(&request, &options.mock_sentences).await {
                 Ok(started) => {
                     let id = started.id().to_string();
                     *session = Some(started);

@@ -3,7 +3,17 @@ name = "translator-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Realtime system-audio subtitle core (phase 1: capture -> VAD -> mock ASR -> subtitles)"
+description = "Realtime system-audio subtitle core (phase 1: capture -> VAD -> ASR -> subtitles)"
+
+[features]
+# On by default so the shipped core can run local Whisper. Remove `whisper`
+# (or build with --no-default-features) for a tiny core that only ships mock.
+default = ["whisper"]
+whisper = ["dep:whisper-rs", "dep:reqwest"]
+# Build the core with the whisper.cpp CUDA backend (needs a CUDA toolkit +
+# a VS toolset CUDA supports, e.g. VS2022 v143). Set WHISPER_CUDA=1 in the
+# build environment; WHISPER_CUDA=0 (or unset) builds a CPU-only core.
+cuda = ["whisper", "whisper-rs/cuda"]
 
 [dependencies]
 translator-protocol.workspace = true
@@ -17,6 +27,15 @@ async-trait.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
+
+# Local Whisper ASR (whisper.cpp through whisper-rs). CUDA is enabled via the
+# WHISPER_CUDA / GGML_CUDA env vars in .cargo/config.toml.
+whisper-rs = { version = "0.14", optional = true }
+# Used only to fetch the model file on first run. rustls avoids an OpenSSL dep;
+# `tokio` gives the async runtime reqwest needs inside the core's event loop.
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
+    "rustls-tls",
+] }
 
 [[bin]]
 name = "translator-core"

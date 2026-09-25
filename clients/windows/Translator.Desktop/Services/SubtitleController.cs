@@ -45,7 +45,11 @@ public sealed class SubtitleController : IAsyncDisposable
 
     public bool IsRunning => _running;
 
-    public async Task StartAsync(SubtitleOptions options, CancellationToken cancellationToken = default)
+    public async Task StartAsync(
+        SubtitleOptions options,
+        string asrProvider = "mock",
+        string language = "",
+        CancellationToken cancellationToken = default)
     {
         if (_running)
         {
@@ -84,6 +88,12 @@ public sealed class SubtitleController : IAsyncDisposable
         capture.DataAvailable += OnAudioData;
         capture.Start();
 
+        // Whisper must download its model and compile (GPU) kernels on the first
+        // run, so give the start request a generous timeout.
+        var startTimeout = asrProvider == "whisper"
+            ? TimeSpan.FromSeconds(300)
+            : RequestTimeout;
+
         var request = new Envelope
         {
             Seq = NextSeq(),
@@ -97,7 +107,12 @@ public sealed class SubtitleController : IAsyncDisposable
                     Format = capture.SampleFormat,
                 },
                 TargetSampleRate = 16_000,
-                Asr = new AsrConfig { Provider = "mock" },
+                Asr = new AsrConfig
+                {
+                    Provider = asrProvider,
+                    Model = "ggml-tiny.bin",
+                    Language = language,
+                },
                 Translation = new TranslationConfig { Provider = "none" },
                 Subtitle = new SubtitleConfig
                 {
@@ -108,8 +123,13 @@ public sealed class SubtitleController : IAsyncDisposable
             },
         };
 
+        StatusChanged?.Invoke(
+            asrProvider == "whisper"
+                ? "正在加载本地 Whisper 模型（首次需下载，请稍候）…"
+                : "正在启动会话…");
+
         var started = await _client
-            .RequestAsync(request, IsStartSessionResponse, RequestTimeout, cancellationToken)
+            .RequestAsync(request, IsStartSessionResponse, startTimeout, cancellationToken)
             .ConfigureAwait(false) ?? throw new TimeoutException("core 未响应会话启动请求");
 
         if (!started.StartSessionResponse.Accepted)

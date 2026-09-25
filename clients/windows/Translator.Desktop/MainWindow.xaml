@@ -30,6 +30,28 @@
                             IsOn="False"
                             Toggled="OnPauseToggled" />
                     </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="20">
+                        <ComboBox
+                            x:Name="ProviderBox"
+                            Header="识别引擎"
+                            SelectedIndex="0"
+                            Width="200">
+                            <ComboBoxItem Content="本地 Whisper (tiny)" Tag="whisper" />
+                            <ComboBoxItem Content="Mock（演示）" Tag="mock" />
+                        </ComboBox>
+                        <ComboBox
+                            x:Name="LanguageBox"
+                            Header="语言"
+                            SelectedIndex="0"
+                            Width="160">
+                            <ComboBoxItem Content="自动检测" Tag="" />
+                            <ComboBoxItem Content="中文" Tag="zh" />
+                            <ComboBoxItem Content="英文" Tag="en" />
+                            <ComboBoxItem Content="日文" Tag="ja" />
+                            <ComboBoxItem Content="韩文" Tag="ko" />
+                        </ComboBox>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -66,7 +88,7 @@
 
             <TextBlock
                 Opacity="0.75"
-                Text="阶段一说明：捕获系统内录音频 → Rust core 做 VAD 与识别 → 字幕悬浮窗显示。当前识别器为内置 Mock，未接入云端服务，也未启用翻译。"
+                Text="阶段一说明：捕获系统内录音频 → Rust core 做 VAD 与识别 → 字幕悬浮窗显示。选择「本地 Whisper」可离线识别（首次需从镜像下载 tiny 模型，约 77MB）。Mock 为演示用假识别。"
                 TextWrapping="Wrap" />
 
         </StackPanel>
