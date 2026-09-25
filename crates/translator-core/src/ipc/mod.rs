@@ -103,7 +103,12 @@ async fn dispatch(
                     accepted: true,
                     server_version: VERSION.to_string(),
                     negotiated_protocol_version: PROTOCOL_VERSION,
-                    features: FEATURES.iter().map(|f| f.to_string()).collect(),
+                    features: {
+                        let mut features: Vec<String> = FEATURES.iter().map(|f| f.to_string()).collect();
+                        #[cfg(feature = "whisper")]
+                        features.push(format!("asr.whisper.engine.{}", crate::asr::whisper::engine_id()));
+                        features
+                    },
                     error: String::new(),
                 }),
             ));

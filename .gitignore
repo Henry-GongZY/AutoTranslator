@@ -19,3 +19,7 @@ Thumbs.db
 **/obj
 **/bin
 *.user
+
+/engines/
+/artifacts/
+/.build-deps/

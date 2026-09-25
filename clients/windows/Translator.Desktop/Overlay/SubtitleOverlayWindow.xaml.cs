@@ -40,6 +40,13 @@ public sealed partial class SubtitleOverlayWindow : Window
         PositionBottomCenter(workArea);
 
         SetClickThrough(true);
+        // WinUI's compositor does not reliably honor layered-window color keys.
+        // Clip the HWND itself so neither the unused surface nor its frame can show.
+        Root.Loaded += (_, _) => UpdateWindowRegion();
+        Root.SizeChanged += (_, _) => UpdateWindowRegion();
+        CaptionBorder.SizeChanged += (_, _) => UpdateWindowRegion();
+        Activated += (_, _) => UpdateWindowRegion();
+        UpdateWindowRegion();
     }
 
     private void ConfigurePresenter()
@@ -68,8 +75,8 @@ public sealed partial class SubtitleOverlayWindow : Window
     }
 
     /// <summary>
-    /// Toggles mouse pass-through. The black colour key stays active either way,
-    /// so the window remains visually transparent.
+    /// Toggles mouse pass-through. The native region keeps the visible window
+    /// confined to the caption card regardless of color-key support.
     /// </summary>
     public void SetClickThrough(bool enabled)
     {
@@ -87,6 +94,37 @@ public sealed partial class SubtitleOverlayWindow : Window
 
         Win32.SetWindowLong(_hwnd, Win32.GwlExStyle, new nint(style));
         Win32.SetLayeredWindowAttributes(_hwnd, 0x0000_0000u, 255, Win32.LwaColorKey);
+        UpdateWindowRegion();
+    }
+
+    private void UpdateWindowRegion()
+    {
+        nint region;
+        if (CaptionBorder.Visibility != Visibility.Visible ||
+            CaptionBorder.ActualWidth <= 0 || CaptionBorder.ActualHeight <= 0)
+        {
+            region = Win32.CreateRectRgn(0, 0, 0, 0);
+        }
+        else
+        {
+            var origin = CaptionBorder.TransformToVisual(Root).TransformPoint(new Windows.Foundation.Point());
+            var scale = Root.XamlRoot?.RasterizationScale ?? Win32.GetDpiForWindow(_hwnd) / 96.0;
+            // Window regions use window coordinates, while XAML uses client coordinates.
+            var client = new Win32.NativePoint();
+            if (!Win32.ClientToScreen(_hwnd, ref client) || !Win32.GetWindowRect(_hwnd, out var window))
+                return;
+            var left = (int)Math.Round(origin.X * scale) + client.X - window.Left;
+            var top = (int)Math.Round(origin.Y * scale) + client.Y - window.Top;
+            var right = left + (int)Math.Ceiling(CaptionBorder.ActualWidth * scale);
+            var bottom = top + (int)Math.Ceiling(CaptionBorder.ActualHeight * scale);
+            var diameter = (int)Math.Round(CaptionBorder.CornerRadius.TopLeft * 2 * scale);
+            region = Win32.CreateRoundRectRgn(left, top, right, bottom, diameter, diameter);
+        }
+
+        if (region == 0) return;
+        // On success Windows owns the HRGN; only free it when transfer fails.
+        if (Win32.SetWindowRgn(_hwnd, region, true) == 0)
+            Win32.DeleteObject(region);
     }
 
     /// <summary>
@@ -99,6 +137,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         if (lines.Count == 0)
         {
             CaptionBorder.Visibility = Visibility.Collapsed;
+            UpdateWindowRegion();
             return;
         }
 
@@ -113,5 +152,8 @@ public sealed partial class SubtitleOverlayWindow : Window
                 Foreground = hasPartial && last ? PartialBrush : CommittedBrush,
             });
         }
+        // Reflow before clipping: a shorter caption must not retain the old region.
+        Root.UpdateLayout();
+        UpdateWindowRegion();
     }
 }

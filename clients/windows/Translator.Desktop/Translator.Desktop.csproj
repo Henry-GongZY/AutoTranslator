@@ -51,15 +51,35 @@
           BeforeTargets="MarkupCompilePass1"
           DependsOnTargets="_Protobuf_Compile_BeforeCsCompile" />
 
-  <!-- Ship the core next to the client when it has already been built. -->
+  <ItemGroup>
+    <Content Include="$(RepoRoot)engines\**\*">
+      <Link>engines\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Prefer the release core (built by build_core_gpu.bat). A routine UI
+       rebuild must not replace it with a CPU-only debug/test build. -->
   <Target Name="CopyCoreBinary" AfterTargets="Build">
     <Copy SourceFiles="$(CoreBinaryDebug)" DestinationFolder="$(OutDir)core\"
-          Condition="Exists('$(CoreBinaryDebug)')" SkipUnchangedFiles="true" />
+          Condition="!Exists('$(CoreBinaryRelease)') And Exists('$(CoreBinaryDebug)')" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyCoreBinaryRelease" AfterTargets="Build">
     <Copy SourceFiles="$(CoreBinaryRelease)" DestinationFolder="$(OutDir)core\"
-          Condition="!Exists('$(CoreBinaryDebug)') And Exists('$(CoreBinaryRelease)')"
+          Condition="Exists('$(CoreBinaryRelease)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Unpackaged WinUI requires its compiled XAML and app resource index at
+       runtime; these generated files are not included by SDK publish by default. -->
+  <Target Name="PublishXamlResources" AfterTargets="Publish">
+    <ItemGroup>
+      <AppXamlResources Include="$(OutDir)**\*.xbf;$(OutDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AppXamlResources)"
+          DestinationFiles="@(AppXamlResources->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
 

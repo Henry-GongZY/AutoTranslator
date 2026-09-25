@@ -102,3 +102,7 @@ cargo test --workspace
   core 统一重采样到 16 kHz 单声道后送入 VAD 与识别器，因此平台差异留在客户端。
 - 字幕悬浮窗用 `WS_EX_LAYERED` + `LWA_COLORKEY` 把纯黑像素抠成透明，配合
   `WS_EX_TRANSPARENT` 实现点击穿透。
+
+## Windows 多引擎版本
+
+四种 Whisper 引擎、模型目录与自动下载的使用和构建流程见 [Windows 识别说明](docs/windows-recognition.md)。新版完整发布使用 scripts/build-release.ps1。

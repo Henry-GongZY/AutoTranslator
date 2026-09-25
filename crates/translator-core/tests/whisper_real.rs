@@ -68,6 +68,8 @@ async fn transcribes_speech_wav() {
         "whisper",
         AsrOptions {
             sentences: Vec::new(),
+            engine: String::new(),
+            model_directory: String::new(),
             model: "ggml-tiny.bin".to_string(),
             language: "en".to_string(),
             initial_prompt: String::new(),

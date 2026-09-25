@@ -14,6 +14,9 @@ use translator_core::ipc::{serve, ServeOptions};
     about = "Realtime system-audio subtitle core (phase 1)"
 )]
 struct Args {
+    /// Print compiled engine ID without starting a session.
+    #[arg(long)]
+    engine_info: bool,
     /// Windows named pipe to listen on, e.g. `\\.\pipe\translator-core-v1`
     #[arg(long)]
     pipe: Option<String>,
@@ -37,6 +40,13 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.engine_info {
+        #[cfg(feature = "whisper")]
+        println!("{}", translator_core::asr::whisper::engine_id());
+        #[cfg(not(feature = "whisper"))]
+        println!("mock");
+        return Ok(());
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(

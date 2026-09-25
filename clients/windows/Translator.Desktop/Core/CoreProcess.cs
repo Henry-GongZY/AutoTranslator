@@ -31,7 +31,7 @@ public sealed class CoreProcess : IDisposable
     /// Locates <c>translator-core.exe</c>: env override, next to the app, a
     /// <c>core\</c> subfolder, then any <c>target\{debug,release}</c> up the tree.
     /// </summary>
-    public static string? FindCoreExecutable()
+    public static string? FindCoreExecutable(string? engine = null)
     {
         const string fileName = "translator-core.exe";
 
@@ -42,6 +42,19 @@ public sealed class CoreProcess : IDisposable
         }
 
         var baseDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrEmpty(engine))
+        {
+            if (engine is not ("cpu" or "blas" or "vulkan" or "cuda")) return null;
+            var root = new DirectoryInfo(baseDir);
+            while (root is not null)
+            {
+                var packaged = Path.Combine(root.FullName, "engines", engine, fileName);
+                if (File.Exists(packaged)) return packaged;
+                root = root.Parent;
+            }
+            return null;
+        }
+
         foreach (var candidate in new[] { fileName, Path.Combine("core", fileName) })
         {
             var full = Path.Combine(baseDir, candidate);
@@ -54,7 +67,7 @@ public sealed class CoreProcess : IDisposable
         var dir = new DirectoryInfo(baseDir.TrimEnd(Path.DirectorySeparatorChar));
         while (dir is not null)
         {
-            foreach (var profile in new[] { "debug", "release" })
+            foreach (var profile in new[] { "release", "debug" })
             {
                 var full = Path.Combine(dir.FullName, "target", profile, fileName);
                 if (File.Exists(full))

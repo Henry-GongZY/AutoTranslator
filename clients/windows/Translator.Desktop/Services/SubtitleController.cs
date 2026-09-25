@@ -49,6 +49,9 @@ public sealed class SubtitleController : IAsyncDisposable
         SubtitleOptions options,
         string asrProvider = "mock",
         string language = "",
+        string engine = "cuda",
+        string model = "ggml-tiny.bin",
+        string modelDirectory = "",
         CancellationToken cancellationToken = default)
     {
         if (_running)
@@ -56,9 +59,9 @@ public sealed class SubtitleController : IAsyncDisposable
             return;
         }
 
-        var corePath = CoreProcess.FindCoreExecutable()
+        var corePath = CoreProcess.FindCoreExecutable(asrProvider == "whisper" ? engine : null)
             ?? throw new FileNotFoundException(
-                "找不到 translator-core.exe。请先运行 `cargo build`，或设置 TRANSLATOR_CORE 环境变量指向它。");
+                $"未安装 {engine} 引擎。请运行 scripts/build-engines.ps1 构建对应引擎包。");
 
         StatusChanged?.Invoke($"启动 core：{corePath}");
         _core.Start(corePath, LogLevel);
@@ -84,7 +87,11 @@ public sealed class SubtitleController : IAsyncDisposable
             throw new InvalidOperationException($"core 拒绝了握手：{handshakeReply.HandshakeResponse.Error}");
         }
 
+        if (asrProvider == "whisper" && !handshakeReply.HandshakeResponse.Features.Contains($"asr.whisper.engine.{engine}"))
+            throw new InvalidOperationException($"核心不支持所选 {engine} 引擎，请更新对应引擎包。");
+
         var capture = new SystemAudioCapture();
+        _capture = capture; // Cleanup also owns capture when model initialization fails.
         capture.DataAvailable += OnAudioData;
         capture.Start();
 
@@ -110,7 +117,9 @@ public sealed class SubtitleController : IAsyncDisposable
                 Asr = new AsrConfig
                 {
                     Provider = asrProvider,
-                    Model = "ggml-tiny.bin",
+                    Model = model,
+                    Engine = engine,
+                    ModelDirectory = modelDirectory,
                     Language = language,
                 },
                 Translation = new TranslationConfig { Provider = "none" },
@@ -125,7 +134,7 @@ public sealed class SubtitleController : IAsyncDisposable
 
         StatusChanged?.Invoke(
             asrProvider == "whisper"
-                ? "正在加载本地 Whisper 模型（首次需下载，请稍候）…"
+                ? $"正在加载模型 {model} · {engine.ToUpperInvariant()}…"
                 : "正在启动会话…");
 
         var started = await _client
@@ -134,7 +143,6 @@ public sealed class SubtitleController : IAsyncDisposable
 
         if (!started.StartSessionResponse.Accepted)
         {
-            capture.Dispose();
             throw new InvalidOperationException($"core 拒绝了会话：{started.StartSessionResponse.Error}");
         }
 

@@ -109,6 +109,8 @@ async fn streams_subtitles_over_a_named_pipe() {
                 target_sample_rate: 16_000,
                 asr: Some(AsrConfig {
                     provider: "mock".to_string(),
+            engine: String::new(),
+            model_directory: String::new(),
                     model: String::new(),
                     language: String::new(),
                 }),

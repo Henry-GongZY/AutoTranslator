@@ -8,6 +8,9 @@ namespace Translator.Desktop.Native;
 /// </summary>
 internal static class Win32
 {
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(nint hWnd);
+
     public const int GwlExStyle = -20;
 
     public const long WsExLayered = 0x0008_0000L;
@@ -15,6 +18,34 @@ internal static class Win32
     public const long WsExToolWindow = 0x0000_0080L;
 
     public const uint LwaColorKey = 0x0000_0001;
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern nint CreateRoundRectRgn(int left, int top, int right, int bottom,
+        int ellipseWidth, int ellipseHeight);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DeleteObject(nint handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int SetWindowRgn(nint hwnd, nint region, bool redraw);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(nint hwnd, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClientToScreen(nint hwnd, ref NativePoint point);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativePoint { public int X, Y; }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
     private static extern nint GetWindowLongPtr64(nint hWnd, int nIndex);

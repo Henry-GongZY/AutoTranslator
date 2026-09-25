@@ -105,6 +105,8 @@ impl Session {
         let asr_opts = asr::AsrOptions {
             sentences: mock_sentences.to_vec(),
             model: asr_cfg.model.clone(),
+            engine: asr_cfg.engine.clone(),
+            model_directory: asr_cfg.model_directory.clone(),
             language: asr_cfg.language.clone(),
             // The protocol does not carry a prompt yet; leave empty so the
             // whisper provider applies its zh auto-prompt rule.

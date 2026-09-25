@@ -5,24 +5,28 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-        The root is pure black on purpose: SetLayeredWindowAttributes uses
-        LWA_COLORKEY with black, so every black pixel becomes fully transparent
-        while the caption pill and its text stay opaque.
+        The HWND region is clipped to CaptionBorder after layout. The black
+        surface outside the card is excluded even when compositor color-key
+        transparency is unavailable.
     -->
     <Grid x:Name="Root" Background="#FF000000">
         <Border
             x:Name="CaptionBorder"
             Margin="0,0,0,28"
-            Padding="20,12"
+            Padding="24,16"
             HorizontalAlignment="Center"
             VerticalAlignment="Bottom"
-            Background="#FF141414"
-            CornerRadius="10"
+            Background="#FF202020"
+            BorderBrush="#FF404040"
+            BorderThickness="1"
+            CornerRadius="12"
             Visibility="Collapsed">
             <TextBlock
                 x:Name="CaptionText"
                 MaxWidth="1040"
                 FontSize="24"
+                LineHeight="34"
+                Foreground="#FFF5F5F5"
                 TextAlignment="Center"
                 TextWrapping="Wrap" />
         </Border>

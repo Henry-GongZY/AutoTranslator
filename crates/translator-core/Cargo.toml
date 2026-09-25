@@ -14,6 +14,8 @@ whisper = ["dep:whisper-rs", "dep:reqwest"]
 # a VS toolset CUDA supports, e.g. VS2022 v143). Set WHISPER_CUDA=1 in the
 # build environment; WHISPER_CUDA=0 (or unset) builds a CPU-only core.
 cuda = ["whisper", "whisper-rs/cuda"]
+blas = ["whisper", "whisper-rs/openblas"]
+vulkan = ["whisper", "whisper-rs/vulkan"]
 
 [dependencies]
 translator-protocol.workspace = true

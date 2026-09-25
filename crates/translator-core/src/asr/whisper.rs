@@ -25,6 +25,9 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 use super::{AsrOptions, RecognitionEvent, SpeechRecognizer};
 use crate::error::{CoreError, Result};
 
+#[cfg(any(all(feature = "cuda", feature = "vulkan"), all(feature = "cuda", feature = "blas"), all(feature = "vulkan", feature = "blas")))]
+compile_error!("Build each Whisper backend separately with scripts/build-engines.ps1");
+
 const SAMPLE_RATE: u32 = 16_000;
 /// Maximum audio kept for one utterance (seconds). Whisper's context window is
 /// ~30 s, 12 s is a comfortable, low-latency default.
@@ -81,7 +84,11 @@ pub struct WhisperAsr {
 
 impl WhisperAsr {
     pub async fn new(opts: AsrOptions) -> Result<Self> {
-        let model_path = resolve_model(&opts.model).await?;
+        validate_engine(&opts.engine)?;
+        if opts.model.contains(".en") && !opts.language.is_empty() && opts.language != "en" {
+            return Err(CoreError::Model("English-only models require English or auto language".into()));
+        }
+        let model_path = resolve_model(&opts.model, &opts.model_directory).await?;
 
         let (ctx, device) = load_context(&model_path)?;
         let state = ctx
@@ -284,32 +291,35 @@ fn join_segments(segs: &[(String, u64, u64)]) -> String {
 }
 
 /// Locate (downloading if necessary) the requested Whisper model file.
-async fn resolve_model(name: &str) -> Result<PathBuf> {
-    if let Ok(explicit) = std::env::var("TRANSLATOR_WHISPER_MODEL") {
-        let path = PathBuf::from(&explicit);
-        if path.exists() {
-            return Ok(path);
+const MODELS: &[&str] = &["tiny", "tiny.en", "base", "base.en", "small", "small.en",
+    "medium", "medium.en", "large", "large-v1", "large-v2", "large-v3"];
+
+fn model_filename(name: &str) -> Result<String> {
+    let id = name.strip_prefix("ggml-").unwrap_or(name);
+    let id = id.strip_suffix(".bin").unwrap_or(id);
+    let id = if id.is_empty() { "tiny" } else if id == "large" { "large-v3" } else { id };
+    if !MODELS.contains(&id) { return Err(CoreError::Model(format!("Unsupported Whisper model: {name}"))); }
+    Ok(format!("ggml-{id}.bin"))
+}
+
+async fn resolve_model(name: &str, directory: &str) -> Result<PathBuf> {
+    let filename = model_filename(name)?;
+    // Explicit UI selection takes precedence over legacy environment overrides.
+    if directory.is_empty() {
+        if let Ok(explicit) = std::env::var("TRANSLATOR_WHISPER_MODEL") {
+            let path = PathBuf::from(explicit);
+            if path.is_file() { return Ok(path); }
+            return Err(CoreError::Model(format!("Model does not exist: {path:?}")));
         }
-        return Err(CoreError::Model(format!(
-            "TRANSLATOR_WHISPER_MODEL points to {path:?} which does not exist"
-        )));
     }
-
-    let mut dir = models_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| CoreError::Model(format!("cannot create models dir: {e}")))?;
-    dir.push(name);
-    if dir.exists() {
-        return Ok(dir);
-    }
-
-    let base = std::env::var("TRANSLATOR_MODEL_BASE_URL").unwrap_or_else(|_| {
-        // Mirror that works well from mainland China; override for other regions.
-        "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/".to_string()
-    });
-    let url = format!("{base}{name}");
-    download(&url, &dir).await?;
-    Ok(dir)
+    let dir = if directory.is_empty() { models_dir() } else { PathBuf::from(directory) };
+    std::fs::create_dir_all(&dir).map_err(|e| CoreError::Model(format!("Cannot create model directory: {e}")))?;
+    let dest = dir.join(filename);
+    if dest.is_file() && std::fs::metadata(&dest).map(|m| m.len() > 4).unwrap_or(false) { return Ok(dest); }
+    let base = std::env::var("TRANSLATOR_MODEL_BASE_URL")
+        .unwrap_or_else(|_| "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/".into());
+    download(&format!("{}/{}", base.trim_end_matches('/'), dest.file_name().unwrap().to_string_lossy()), &dest).await?;
+    Ok(dest)
 }
 
 fn models_dir() -> PathBuf {
@@ -322,33 +332,49 @@ fn models_dir() -> PathBuf {
 }
 
 async fn download(url: &str, dest: &Path) -> Result<()> {
-    tracing::info!("downloading whisper model from {url} ...");
-    let resp = reqwest::get(url)
-        .await
-        .map_err(|e| CoreError::Model(format!("model download request failed: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(CoreError::Model(format!(
-            "model download failed: HTTP {}",
-            resp.status()
-        )));
-    }
-    let total = resp.content_length().unwrap_or(0);
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| CoreError::Model(format!("model download stream failed: {e}")))?;
+    use std::io::Write;
+    let mut resp = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(30))
+        .build().map_err(|e| CoreError::Model(e.to_string()))?
+        .get(url).send().await.map_err(|e| CoreError::Model(format!("Download failed: {e}")))?
+        .error_for_status().map_err(|e| CoreError::Model(e.to_string()))?;
+    let total = resp.content_length();
+    let tmp = dest.with_extension(format!("{}.part", std::process::id()));
+    let result = async {
+        let mut file = std::fs::File::create(&tmp).map_err(|e| CoreError::Model(e.to_string()))?;
+        let mut received = 0u64;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| CoreError::Model(e.to_string()))? {
+            file.write_all(&chunk).map_err(|e| CoreError::Model(e.to_string()))?;
+            received += chunk.len() as u64;
+        }
+        if received < 4 || total.is_some_and(|n| n != received) {
+            return Err(CoreError::Model("Incomplete model download".into()));
+        }
+        file.sync_all().map_err(|e| CoreError::Model(e.to_string()))?;
+        drop(file);
+        let magic = { use std::io::Read; let mut f = std::fs::File::open(&tmp).map_err(|e| CoreError::Model(e.to_string()))?;
+            let mut magic = [0; 4]; f.read_exact(&mut magic).map_err(|e| CoreError::Model(e.to_string()))?; magic };
+        if magic != *b"lmgg" { return Err(CoreError::Model("Downloaded file is not a Whisper GGML model".into())); }
+        std::fs::rename(&tmp, dest).map_err(|e| CoreError::Model(e.to_string()))
+    }.await;
+    if result.is_err() { let _ = std::fs::remove_file(tmp); }
+    result
+}
 
-    let tmp = dest.with_extension("part");
-    std::fs::write(&tmp, &bytes)
-        .map_err(|e| CoreError::Model(format!("cannot write {tmp:?}: {e}")))?;
-    std::fs::rename(&tmp, dest)
-        .map_err(|e| CoreError::Model(format!("cannot finalize model: {e}")))?;
-    tracing::info!(
-        "whisper model saved to {dest:?} ({} MB)",
-        bytes.len() / 1_000_000
-    );
-    let _ = total;
-    Ok(())
+#[cfg(test)]
+mod model_selection_tests {
+    use super::*;
+    #[test]
+    fn aliases_and_paths() {
+        assert_eq!(model_filename("large").unwrap(), "ggml-large-v3.bin");
+        assert_eq!(model_filename("ggml-tiny.en.bin").unwrap(), "ggml-tiny.en.bin");
+        assert!(model_filename("../other.bin").is_err());
+        assert!(model_filename("https://example.org/model").is_err());
+    }
+    #[test]
+    fn engine_mismatch_is_not_silent_fallback() {
+        assert!(validate_engine(engine_id()).is_ok());
+        assert!(validate_engine("unknown").is_err());
+    }
 }
 
 /// `WhisperContextParameters` with the GPU explicitly on or off.
@@ -390,46 +416,35 @@ fn build_base_params(
     params
 }
 
-/// Load the model, reporting the *actual* compute device.
-///
-/// whisper.cpp never fails when GPU inference is unavailable: a context built
-/// without the `cuda` feature ignores `use_gpu = true`, and a CUDA build falls
-/// back to CPU on its own when the driver/device cannot be initialized. Both
-/// cases would silently report "GPU" while running on CPU, so probe first and
-/// only attempt the GPU when it can actually work.
-#[cfg(feature = "cuda")]
-fn load_context(path: &Path) -> Result<(WhisperContext, String)> {
-    let path_str = path.to_str().unwrap_or_default();
-
-    if !cuda_device_available() {
-        tracing::warn!(
-            "cuda feature is enabled but no usable NVIDIA driver/GPU was found; running on CPU"
-        );
-        let ctx = WhisperContext::new_with_params(path_str, context_params(false))
-            .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
-        return Ok((ctx, "CPU (no CUDA device)".to_string()));
-    }
-
-    match WhisperContext::new_with_params(path_str, context_params(true)) {
-        Ok(ctx) => Ok((ctx, "GPU".to_string())),
-        Err(gpu_err) => {
-            tracing::warn!("whisper GPU init failed ({gpu_err}); falling back to CPU");
-            let ctx = WhisperContext::new_with_params(path_str, context_params(false))
-                .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
-            Ok((ctx, "CPU (GPU init failed)".to_string()))
-        }
-    }
+/// Each shipped engine has an isolated executable and native dependencies.
+pub fn engine_id() -> &'static str {
+    if cfg!(feature = "cuda") { "cuda" }
+    else if cfg!(feature = "vulkan") { "vulkan" }
+    else if cfg!(feature = "blas") { "blas" }
+    else { "cpu" }
 }
 
-#[cfg(not(feature = "cuda"))]
+fn validate_engine(requested: &str) -> Result<()> {
+    if !requested.is_empty() && requested != engine_id() {
+        return Err(CoreError::Unsupported(format!(
+            "Requested {requested} engine, but this core contains {}. Install the matching engine package.", engine_id())));
+    }
+    Ok(())
+}
+
 fn load_context(path: &Path) -> Result<(WhisperContext, String)> {
-    tracing::warn!(
-        "whisper built without the `cuda` feature; running on CPU \
-         (build with build_core_gpu.bat to enable GPU inference)"
-    );
-    let ctx = WhisperContext::new_with_params(path.to_str().unwrap_or_default(), context_params(false))
-        .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
-    Ok((ctx, "CPU (cuda feature not enabled)".to_string()))
+    #[cfg(feature = "cuda")]
+    if !cuda_device_available() {
+        return Err(CoreError::Model("CUDA engine requires a usable NVIDIA GPU and driver; select CPU explicitly to continue".into()));
+    }
+    #[cfg(feature = "vulkan")]
+    if whisper_rs::vulkan::list_devices().is_empty() {
+        return Err(CoreError::Model("Vulkan engine found no compatible GPU; update the driver or select CPU".into()));
+    }
+    let gpu = cfg!(any(feature = "cuda", feature = "vulkan"));
+    let ctx = WhisperContext::new_with_params(path.to_str().unwrap_or_default(), context_params(gpu))
+        .map_err(|e| CoreError::Model(format!("{} engine initialization failed: {e}", engine_id())))?;
+    Ok((ctx, engine_id().to_uppercase()))
 }
 
 /// True when an NVIDIA driver with at least one usable GPU is present.

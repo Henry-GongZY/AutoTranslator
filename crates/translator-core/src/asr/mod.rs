@@ -11,9 +11,11 @@ use crate::error::{CoreError, Result};
 
 /// Options handed to an ASR provider when it is constructed.
 pub struct AsrOptions {
+    pub engine: String,
+    pub model_directory: String,
     /// Rotating sentences for the mock provider.
     pub sentences: Vec<String>,
-    /// Whisper model file name (e.g. `ggml-tiny.bin`) or an absolute path.
+    /// Whisper catalog ID or file name (e.g. `tiny` or `ggml-tiny.bin`).
     pub model: String,
     /// Whisper language hint (e.g. `zh`, `en`); empty means auto-detect.
     pub language: String,
@@ -26,6 +28,8 @@ pub struct AsrOptions {
 impl Default for AsrOptions {
     fn default() -> Self {
         Self {
+            engine: String::new(),
+            model_directory: String::new(),
             sentences: Vec::new(),
             model: "ggml-tiny.bin".to_string(),
             language: String::new(),
