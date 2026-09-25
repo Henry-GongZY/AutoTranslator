@@ -17,4 +17,13 @@ set PROTOC=C:\Users\Henrygongzy\AppData\Local\Microsoft\WinGet\Packages\Google.P
 cd /d c:\Users\Henrygongzy\Desktop\Projects\Tools\Translator
 for /d %%d in (target\release\build\whisper-rs-sys-*) do rmdir /s /q "%%d"
 cargo build -p translator-core --features cuda --release > build_core_gpu.log 2>&1
+if not errorlevel 1 (
+    REM Deploy the fresh core into every client output dir. The csproj only
+    REM re-copies on a .NET rebuild, so without this the client keeps running a
+    REM stale core (e.g. a CPU-only one) from its own bin folder.
+    for /d %%d in ("%~dp0clients\windows\Translator.Desktop\bin\*\*\win-x64\core") do (
+        copy /y "%~dp0target\release\translator-core.exe" "%%d\translator-core.exe" >nul
+        echo deployed core to %%d >> build_core_gpu.log
+    )
+)
 echo CARGO_EXIT=%ERRORLEVEL% >> build_core_gpu.log

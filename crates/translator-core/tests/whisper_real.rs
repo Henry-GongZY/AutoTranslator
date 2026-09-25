@@ -8,7 +8,7 @@
 
 #![cfg(feature = "whisper")]
 
-use translator_core::asr::{self, AsrOptions, RecognitionEvent, SpeechRecognizer};
+use translator_core::asr::{self, AsrOptions, RecognitionEvent};
 
 fn read_wav_mono_f32(path: &str) -> Vec<f32> {
     let data = std::fs::read(path).expect("read wav");

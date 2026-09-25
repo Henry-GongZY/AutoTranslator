@@ -316,23 +316,99 @@ async fn download(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `WhisperContextParameters` with the GPU explicitly on or off.
+/// `'static` is fine: with default DTW parameters nothing is borrowed.
+fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
+    WhisperContextParameters {
+        use_gpu,
+        ..Default::default()
+    }
+}
+
+/// Load the model, reporting the *actual* compute device.
+///
+/// whisper.cpp never fails when GPU inference is unavailable: a context built
+/// without the `cuda` feature ignores `use_gpu = true`, and a CUDA build falls
+/// back to CPU on its own when the driver/device cannot be initialized. Both
+/// cases would silently report "GPU" while running on CPU, so probe first and
+/// only attempt the GPU when it can actually work.
+#[cfg(feature = "cuda")]
 fn load_context(path: &Path) -> Result<(WhisperContext, String)> {
     let path_str = path.to_str().unwrap_or_default();
-    let try_gpu = WhisperContextParameters {
-        use_gpu: true,
-        ..Default::default()
-    };
-    match WhisperContext::new_with_params(path_str, try_gpu) {
+
+    if !cuda_device_available() {
+        tracing::warn!(
+            "cuda feature is enabled but no usable NVIDIA driver/GPU was found; running on CPU"
+        );
+        let ctx = WhisperContext::new_with_params(path_str, context_params(false))
+            .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
+        return Ok((ctx, "CPU (no CUDA device)".to_string()));
+    }
+
+    match WhisperContext::new_with_params(path_str, context_params(true)) {
         Ok(ctx) => Ok((ctx, "GPU".to_string())),
         Err(gpu_err) => {
             tracing::warn!("whisper GPU init failed ({gpu_err}); falling back to CPU");
-            let cpu = WhisperContextParameters {
-                use_gpu: false,
-                ..Default::default()
-            };
-            let ctx = WhisperContext::new_with_params(path_str, cpu)
+            let ctx = WhisperContext::new_with_params(path_str, context_params(false))
                 .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
-            Ok((ctx, "CPU".to_string()))
+            Ok((ctx, "CPU (GPU init failed)".to_string()))
         }
     }
+}
+
+#[cfg(not(feature = "cuda"))]
+fn load_context(path: &Path) -> Result<(WhisperContext, String)> {
+    tracing::warn!(
+        "whisper built without the `cuda` feature; running on CPU \
+         (build with build_core_gpu.bat to enable GPU inference)"
+    );
+    let ctx = WhisperContext::new_with_params(path.to_str().unwrap_or_default(), context_params(false))
+        .map_err(|e| CoreError::Model(format!("whisper context load failed: {e}")))?;
+    Ok((ctx, "CPU (cuda feature not enabled)".to_string()))
+}
+
+/// True when an NVIDIA driver with at least one usable GPU is present.
+///
+/// Probed by loading `nvcuda.dll` (installed with the driver, not the toolkit)
+/// and calling `cuInit` + `cuDeviceGetCount`. This mirrors the check whisper.cpp
+/// does internally, minus its silent CPU fallback.
+#[cfg(all(windows, feature = "cuda"))]
+fn cuda_device_available() -> bool {
+    use core::ffi::{c_int, c_uint, c_void};
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LoadLibraryW(name: *const u16) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+    }
+
+    let dll_name: Vec<u16> = "nvcuda.dll\0".encode_utf16().collect();
+    let dll = unsafe { LoadLibraryW(dll_name.as_ptr()) };
+    if dll.is_null() {
+        return false;
+    }
+
+    unsafe {
+        let cu_init_ptr = GetProcAddress(dll, b"cuInit\0".as_ptr());
+        let cu_count_ptr = GetProcAddress(dll, b"cuDeviceGetCount\0".as_ptr());
+        if cu_init_ptr.is_null() || cu_count_ptr.is_null() {
+            return false;
+        }
+        // CUDA driver API is stdcall on Windows; identical to C on x64.
+        let cu_init: unsafe extern "system" fn(c_uint) -> c_int = core::mem::transmute(cu_init_ptr);
+        let cu_count: unsafe extern "system" fn(*mut c_int) -> c_int =
+            core::mem::transmute(cu_count_ptr);
+
+        if cu_init(0) != 0 {
+            return false;
+        }
+        let mut count: c_int = 0;
+        cu_count(&mut count) == 0 && count > 0
+    }
+}
+
+/// Non-Windows CUDA build: no cheap probe, attempt GPU and let whisper.cpp decide.
+#[cfg(all(not(windows), feature = "cuda"))]
+fn cuda_device_available() -> bool {
+    true
 }
