@@ -106,6 +106,9 @@ impl Session {
             sentences: mock_sentences.to_vec(),
             model: asr_cfg.model.clone(),
             language: asr_cfg.language.clone(),
+            // The protocol does not carry a prompt yet; leave empty so the
+            // whisper provider applies its zh auto-prompt rule.
+            initial_prompt: String::new(),
         };
         let recognizer = asr::create(provider, asr_opts).await?;
 

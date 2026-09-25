@@ -17,6 +17,10 @@ pub struct AsrOptions {
     pub model: String,
     /// Whisper language hint (e.g. `zh`, `en`); empty means auto-detect.
     pub language: String,
+    /// Whisper initial prompt; empty means the provider default, which for
+    /// Whisper is a Simplified-Chinese bias prompt injected whenever
+    /// `language` is `zh` (whisper's raw zh output skews Traditional).
+    pub initial_prompt: String,
 }
 
 impl Default for AsrOptions {
@@ -25,6 +29,7 @@ impl Default for AsrOptions {
             sentences: Vec::new(),
             model: "ggml-tiny.bin".to_string(),
             language: String::new(),
+            initial_prompt: String::new(),
         }
     }
 }

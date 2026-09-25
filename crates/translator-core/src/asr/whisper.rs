@@ -11,6 +11,10 @@
 //!
 //! The subtitle stabilizer de-duplicates and keeps the on-screen block stable.
 //! The first decode also compiles any GPU kernels, so it is slower than the rest.
+//!
+//! Language: when the hint is `zh` (and no explicit prompt is configured) each
+//! decode is seeded with a Simplified-Chinese initial prompt, because whisper's
+//! raw zh output skews Traditional — see `resolve_initial_prompt`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -30,15 +34,41 @@ const STEP_SECONDS: f32 = 2.0;
 /// Skip decoding utterances shorter than this (seconds).
 const MIN_UTTERANCE_SECONDS: f32 = 0.5;
 
+/// Simplified-Chinese bias prompt for `zh` decodes.
+///
+/// Whisper treats Simplified and Traditional as one language (`zh`) and its
+/// training data skews Traditional, so raw zh output comes out Traditional.
+/// This prompt steers the decoder to Simplified; whisper.cpp re-injects it on
+/// every decode even with `no_context`, which matches our per-window scheme.
+const ZH_INITIAL_PROMPT: &str = "以下是普通话的句子。";
+
+/// Effective initial prompt for a recognizer instance.
+///
+/// An explicitly configured prompt always wins. Otherwise `zh`-family language
+/// hints get the default Simplified-Chinese bias prompt; auto-detect (empty
+/// language) gets none, because a Chinese prompt would poison transcripts of
+/// non-Chinese audio.
+fn resolve_initial_prompt(language: &str, configured: &str) -> String {
+    if !configured.is_empty() {
+        return configured.to_string();
+    }
+    if language.to_ascii_lowercase().starts_with("zh") {
+        return ZH_INITIAL_PROMPT.to_string();
+    }
+    String::new()
+}
+
 #[allow(dead_code)]
 pub struct WhisperAsr {
     /// Owns the model weights; shared, never mutated after load.
     ctx: WhisperContext,
     /// Per-call inference state. Behind a `Mutex` so the struct stays `Sync`.
     state: Mutex<WhisperState>,
-    /// Whisper language hint (empty = auto-detect); stored owned so we can build
-    /// `FullParams` (which borrows the hint) per decode call.
-    language: String,
+    /// Params template (language hint, initial prompt, decode settings), built
+    /// once and cloned per decode. The setters store the strings as leaked C
+    /// pointers inside `FullParams`, so building once also means each string is
+    /// leaked exactly once instead of on every decode.
+    base_params: FullParams<'static, 'static>,
     /// Monotonic audio of the current utterance (16 kHz mono f32).
     audio: Vec<f32>,
     /// Absolute session time (us) of `audio[0]`.
@@ -58,14 +88,21 @@ impl WhisperAsr {
             .create_state()
             .map_err(|e| CoreError::Model(format!("whisper state init failed: {e}")))?;
 
+        let initial_prompt = resolve_initial_prompt(&opts.language, &opts.initial_prompt);
+
         tracing::info!(
-            "whisper asr ready: model={} device={} language={}",
+            "whisper asr ready: model={} device={} language={} prompt={}",
             model_path.display(),
             device,
             if opts.language.is_empty() {
                 "auto"
             } else {
                 &opts.language
+            },
+            if initial_prompt.is_empty() {
+                "none"
+            } else {
+                initial_prompt.as_str()
             }
         );
         println!(
@@ -73,10 +110,26 @@ impl WhisperAsr {
             model_path.display()
         );
 
+        let base_params = build_base_params(
+            // Leak the language hint and prompt into 'static storage: the
+            // whisper-rs setters already leak the CStrings they build, so the
+            // only choice is one copy per instance vs one per decode.
+            if opts.language.is_empty() {
+                None
+            } else {
+                Some(Box::leak(opts.language.clone().into_boxed_str()))
+            },
+            if initial_prompt.is_empty() {
+                None
+            } else {
+                Some(Box::leak(initial_prompt.into_boxed_str()))
+            },
+        );
+
         Ok(Self {
             ctx,
             state: Mutex::new(state),
-            language: opts.language,
+            base_params,
             audio: Vec::new(),
             audio_start_us: 0,
             last_infer_end_us: 0,
@@ -85,27 +138,9 @@ impl WhisperAsr {
         })
     }
 
-    /// Build a fresh `FullParams` for one decode, borrowing `self.language`.
-    fn build_params(&self) -> FullParams<'_, '_> {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(if self.language.is_empty() {
-            None
-        } else {
-            Some(self.language.as_str())
-        });
-        params.set_translate(false);
-        params.set_token_timestamps(true);
-        params.set_print_progress(false);
-        params.set_suppress_blank(true);
-        // Each window is an independent utterance; do not carry context across.
-        params.set_no_context(true);
-        params.set_max_len(0);
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(8);
-        params.set_n_threads(threads as i32);
-        params
+    /// Params for one decode: a cheap clone of the shared template.
+    fn build_params(&self) -> FullParams<'static, 'static> {
+        self.base_params.clone()
     }
 
     /// Decode the current utterance buffer and return `(text, start_us, end_us)`
@@ -325,6 +360,36 @@ fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
     }
 }
 
+/// Decode settings shared by every window of a recognizer instance.
+///
+/// `language` / `initial_prompt` may be `None`; passed-in strings must be
+/// `&'static` because `FullParams` stores them as leaked C pointers.
+fn build_base_params(
+    language: Option<&'static str>,
+    initial_prompt: Option<&'static str>,
+) -> FullParams<'static, 'static> {
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    params.set_language(language);
+    params.set_translate(false);
+    params.set_token_timestamps(true);
+    params.set_print_progress(false);
+    params.set_suppress_blank(true);
+    // Each window is an independent utterance; do not carry context across.
+    // The initial prompt (if any) still applies — whisper.cpp injects it after
+    // clearing the carried-over context.
+    params.set_no_context(true);
+    params.set_max_len(0);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(8);
+    params.set_n_threads(threads as i32);
+    if let Some(prompt) = initial_prompt {
+        params.set_initial_prompt(prompt);
+    }
+    params
+}
+
 /// Load the model, reporting the *actual* compute device.
 ///
 /// whisper.cpp never fails when GPU inference is unavailable: a context built
@@ -411,4 +476,29 @@ fn cuda_device_available() -> bool {
 #[cfg(all(not(windows), feature = "cuda"))]
 fn cuda_device_available() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_initial_prompt;
+
+    #[test]
+    fn zh_language_gets_the_simplified_bias_prompt() {
+        assert!(!resolve_initial_prompt("zh", "").is_empty());
+        assert!(!resolve_initial_prompt("zh-CN", "").is_empty());
+        assert!(!resolve_initial_prompt("ZH", "").is_empty());
+    }
+
+    #[test]
+    fn non_chinese_and_auto_get_no_prompt() {
+        assert_eq!(resolve_initial_prompt("en", ""), "");
+        assert_eq!(resolve_initial_prompt("ja", ""), "");
+        assert_eq!(resolve_initial_prompt("", ""), "");
+    }
+
+    #[test]
+    fn configured_prompt_always_wins() {
+        assert_eq!(resolve_initial_prompt("zh", "自定义提示"), "自定义提示");
+        assert_eq!(resolve_initial_prompt("en", "english prompt"), "english prompt");
+    }
 }

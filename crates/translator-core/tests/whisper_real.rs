@@ -70,6 +70,7 @@ async fn transcribes_speech_wav() {
             sentences: Vec::new(),
             model: "ggml-tiny.bin".to_string(),
             language: "en".to_string(),
+            initial_prompt: String::new(),
         },
     )
     .await
