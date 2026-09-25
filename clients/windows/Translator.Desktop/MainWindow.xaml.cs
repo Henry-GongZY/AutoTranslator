@@ -87,7 +87,9 @@ public sealed partial class MainWindow : Window
     private void OnSubtitlesChanged(IReadOnlyList<string> lines, bool hasPartial)
     {
         // Raised on the pipe reader thread; WinUI requires the UI thread.
-        _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetLines(lines, hasPartial));
+        // Normalize Traditional -> Simplified Chinese for display.
+        var simplified = lines.Select(ChineseConverter.ToSimplified).ToArray();
+        _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetLines(simplified, hasPartial));
     }
 
     private void OnStatusChanged(string status)
