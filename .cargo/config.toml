@@ -10,4 +10,9 @@
 #      back to CPU if CUDA init fails.
 #
 # When WHISPER_CUDA is unset (or "0") the core builds a CPU-only Whisper.
+#
+# macOS / Apple Silicon: build the Metal engine with
+#   cargo build -p translator-core --release --no-default-features --features metal
+# (or scripts/build-engines.sh). whisper-rs-sys compiles GGML_METAL with the
+# shader library embedded into the binary, so no runtime .metallib is needed.
 

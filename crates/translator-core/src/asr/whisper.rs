@@ -16,8 +16,9 @@
 //! decode is seeded with a Simplified-Chinese initial prompt, because whisper's
 //! raw zh output skews Traditional — see `resolve_initial_prompt`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
@@ -25,8 +26,18 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 use super::{AsrOptions, RecognitionEvent, SpeechRecognizer};
 use crate::error::{CoreError, Result};
 
-#[cfg(any(all(feature = "cuda", feature = "vulkan"), all(feature = "cuda", feature = "blas"), all(feature = "vulkan", feature = "blas")))]
-compile_error!("Build each Whisper backend separately with scripts/build-engines.ps1");
+/// Each shipped engine is an isolated executable; building two whisper.cpp
+/// backends into one binary is not supported (native deps would clash).
+const _: () = {
+    let backends = cfg!(feature = "cuda") as u32
+        + cfg!(feature = "vulkan") as u32
+        + cfg!(feature = "blas") as u32
+        + cfg!(feature = "metal") as u32;
+    assert!(
+        backends <= 1,
+        "Build each Whisper backend separately (scripts/build-engines.ps1 / build-engines.sh)"
+    );
+};
 
 const SAMPLE_RATE: u32 = 16_000;
 /// Maximum audio kept for one utterance (seconds). Whisper's context window is
@@ -63,8 +74,9 @@ fn resolve_initial_prompt(language: &str, configured: &str) -> String {
 
 #[allow(dead_code)]
 pub struct WhisperAsr {
-    /// Owns the model weights; shared, never mutated after load.
-    ctx: WhisperContext,
+    /// Model weights, shared with the process-wide context cache (see
+    /// `load_context_cached`); never mutated after load.
+    ctx: Arc<WhisperContext>,
     /// Per-call inference state. Behind a `Mutex` so the struct stays `Sync`.
     state: Mutex<WhisperState>,
     /// Params template (language hint, initial prompt, decode settings), built
@@ -90,7 +102,7 @@ impl WhisperAsr {
         }
         let model_path = resolve_model(&opts.model, &opts.model_directory).await?;
 
-        let (ctx, device) = load_context(&model_path)?;
+        let (ctx, device) = load_context_cached(&model_path)?;
         let state = ctx
             .create_state()
             .map_err(|e| CoreError::Model(format!("whisper state init failed: {e}")))?;
@@ -202,6 +214,7 @@ impl SpeechRecognizer for WhisperAsr {
         samples: &[f32],
         speech: bool,
         end_us: u64,
+        infer_partial: bool,
     ) -> Result<Vec<RecognitionEvent>> {
         let mut events = Vec::new();
 
@@ -219,7 +232,11 @@ impl SpeechRecognizer for WhisperAsr {
                 self.speaking = true;
             }
             let since = end_us.saturating_sub(self.last_infer_end_us);
-            if since >= (STEP_SECONDS * 1_000_000.0) as u64 {
+            // When `infer_partial` is false the caller still has queued audio:
+            // decoding now would only describe a window that is already stale.
+            // Leave `last_infer_end_us` untouched, so the newest push of the
+            // batch (or a flush) performs one merged decode instead.
+            if infer_partial && since >= (STEP_SECONDS * 1_000_000.0) as u64 {
                 self.last_infer_end_us = end_us;
                 let segs = self.decode()?;
                 let text = join_segments(&segs);
@@ -420,6 +437,7 @@ fn build_base_params(
 pub fn engine_id() -> &'static str {
     if cfg!(feature = "cuda") { "cuda" }
     else if cfg!(feature = "vulkan") { "vulkan" }
+    else if cfg!(feature = "metal") { "metal" }
     else if cfg!(feature = "blas") { "blas" }
     else { "cpu" }
 }
@@ -441,10 +459,39 @@ fn load_context(path: &Path) -> Result<(WhisperContext, String)> {
     if whisper_rs::vulkan::list_devices().is_empty() {
         return Err(CoreError::Model("Vulkan engine found no compatible GPU; update the driver or select CPU".into()));
     }
-    let gpu = cfg!(any(feature = "cuda", feature = "vulkan"));
+    // Metal: whisper-rs-sys embeds the GGML Metal shader library at build time
+    // and every macOS build that ships Metal has a device. A failed context
+    // creation surfaces below as a Model error — no silent CPU fallback.
+    let gpu = cfg!(any(feature = "cuda", feature = "vulkan", feature = "metal"));
     let ctx = WhisperContext::new_with_params(path.to_str().unwrap_or_default(), context_params(gpu))
         .map_err(|e| CoreError::Model(format!("{} engine initialization failed: {e}", engine_id())))?;
     Ok((ctx, engine_id().to_uppercase()))
+}
+
+/// Process-wide context cache, keyed by (engine id, model path): the same file
+/// loads differently per backend, so a backend switch must not reuse a context.
+/// Keeping the weights resident across sessions avoids paying model load (and
+/// first-run download) again on every session start.
+static CONTEXT_CACHE: OnceLock<Mutex<HashMap<(String, PathBuf), Arc<WhisperContext>>>> =
+    OnceLock::new();
+
+/// Load (or reuse) the Whisper context for `path`. On a cache hit the returned
+/// `Arc` shares the resident weights; each caller still gets its own
+/// `WhisperState` via `create_state`.
+fn load_context_cached(path: &Path) -> Result<(Arc<WhisperContext>, String)> {
+    let key = (engine_id().to_string(), path.to_path_buf());
+    let mut cache = CONTEXT_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| CoreError::Internal("whisper context cache poisoned".into()))?;
+    if let Some(ctx) = cache.get(&key) {
+        tracing::info!("whisper context cache hit: {}", path.display());
+        return Ok((ctx.clone(), engine_id().to_uppercase()));
+    }
+    let (ctx, device) = load_context(path)?;
+    let ctx = Arc::new(ctx);
+    cache.insert(key, ctx.clone());
+    Ok((ctx, device))
 }
 
 /// True when an NVIDIA driver with at least one usable GPU is present.

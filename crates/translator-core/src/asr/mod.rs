@@ -60,6 +60,12 @@ pub enum RecognitionEvent {
 ///
 /// `speech` is the VAD hint: mock/segmented engines use it to delimit
 /// utterances, true streaming engines are free to ignore it.
+///
+/// `infer_partial` lets the caller merge backlogged mid-utterance decodes:
+/// when more audio is already queued behind this call, the caller passes
+/// `false` so the recogniser only buffers, and the newest push of a batch
+/// passes `true` to run the partial decode once. Utterance-end (final)
+/// decoding is unaffected and always runs when the VAD closes.
 #[async_trait]
 pub trait SpeechRecognizer: Send + Sync {
     fn name(&self) -> &str;
@@ -71,6 +77,7 @@ pub trait SpeechRecognizer: Send + Sync {
         samples: &[f32],
         speech: bool,
         end_us: u64,
+        infer_partial: bool,
     ) -> Result<Vec<RecognitionEvent>>;
 
     /// Emit whatever is still buffered (used when a session stops).
