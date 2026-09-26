@@ -29,12 +29,25 @@ use crate::error::{CoreError, Result};
 use crate::session::Session;
 use crate::VERSION;
 
-/// Features the phase-1 core advertises during the handshake.
+/// Features the core advertises during the handshake.
 #[cfg(feature = "whisper")]
-const FEATURES: &[&str] = &["audio.pcm", "asr.mock", "asr.whisper", "translation.none"];
+const FEATURES: &[&str] = &[
+    "audio.pcm",
+    "asr.mock",
+    "asr.whisper",
+    "translation.none",
+    "translation.mock",
+    "translation.apple-translate",
+];
 
 #[cfg(not(feature = "whisper"))]
-const FEATURES: &[&str] = &["audio.pcm", "asr.mock", "translation.none"];
+const FEATURES: &[&str] = &[
+    "audio.pcm",
+    "asr.mock",
+    "translation.none",
+    "translation.mock",
+    "translation.apple-translate",
+];
 
 /// Audio frames buffered between the reader and the pipeline. Bounded on
 /// purpose: a full queue backpressures the client instead of growing memory.

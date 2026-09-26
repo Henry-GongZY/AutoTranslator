@@ -285,3 +285,175 @@ async fn streams_subtitles_over_local_transport() {
     }
     assert!(exited, "core did not exit after the client disconnected");
 }
+
+/// Full chain check with translation enabled: mock ASR (English) → committed
+/// subtitles must carry a translation from the configured provider. Uses the
+/// deterministic `mock` translator so the run needs no language assets.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn committed_subtitles_carry_translation() {
+    #[cfg(windows)]
+    let endpoint = format!(r"\\.\pipe\translator-core-e2e-t-{}", std::process::id());
+    #[cfg(unix)]
+    let endpoint = format!("/tmp/translator-core-e2e-t-{}.sock", std::process::id());
+
+    let mut child = Command::new(core_binary())
+        .args(endpoint_arg(&endpoint))
+        .args([
+            "--log-level",
+            "warn",
+            "--mock-sentence",
+            "Hello there, this is the first utterance.",
+            "--mock-sentence",
+            "And this is the second one for translation.",
+        ])
+        .spawn()
+        .expect("failed to spawn translator-core");
+    let client = connect_with_retry(&endpoint).await;
+
+    let (mut reader, mut writer) = tokio::io::split(client);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Envelope>();
+    let reader_task = tokio::spawn(async move {
+        while let Ok(Some(envelope)) = read_frame(&mut reader).await {
+            if tx.send(envelope).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut seq = 1u32;
+    write_frame(
+        &mut writer,
+        &Envelope {
+            seq,
+            payload: Some(Payload::HandshakeRequest(HandshakeRequest {
+                protocol_version: PROTOCOL_VERSION,
+                client_id: "e2e".to_string(),
+                client_version: "0.0.0".to_string(),
+                features: Vec::new(),
+            })),
+        },
+    )
+    .await
+    .unwrap();
+
+    seq += 1;
+    write_frame(
+        &mut writer,
+        &Envelope {
+            seq,
+            payload: Some(Payload::StartSessionRequest(StartSessionRequest {
+                session_id: "e2e-translation".to_string(),
+                input_format: Some(AudioFormat {
+                    sample_rate: SAMPLE_RATE,
+                    channels: CHANNELS as u32,
+                    format: SampleFormat::F32 as i32,
+                }),
+                target_sample_rate: 16_000,
+                asr: Some(AsrConfig {
+                    provider: "mock".to_string(),
+                    engine: String::new(),
+                    model_directory: String::new(),
+                    model: String::new(),
+                    // Translation needs an explicit source side.
+                    language: "en".to_string(),
+                }),
+                translation: Some(TranslationConfig {
+                    provider: "mock".to_string(),
+                    target_language: "zh-Hans".to_string(),
+                }),
+                subtitle: Some(SubtitleConfig {
+                    max_lines: 2,
+                    max_chars_per_line: 40,
+                    partial_interval_ms: 100,
+                    commit_silence_ms: 300,
+                }),
+            })),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Two utterances separated by silence.
+    let mut phase = 0.0f64;
+    let mut audio: Vec<f32> = Vec::new();
+    for _ in 0..2 {
+        audio.extend(burst(1.2, 0.3, &mut phase));
+        audio.extend(burst(0.8, 0.00001, &mut phase));
+    }
+
+    let samples_per_chunk = SAMPLE_RATE as usize * CHUNK_MS as usize / 1000 * CHANNELS;
+    for chunk in audio.chunks(samples_per_chunk) {
+        let frames = chunk.len() / CHANNELS;
+        let mut pcm = Vec::with_capacity(chunk.len() * 4);
+        for sample in chunk {
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        seq += 1;
+        write_frame(
+            &mut writer,
+            &Envelope {
+                seq,
+                payload: Some(Payload::AudioFrame(AudioFrame {
+                    session_id: "e2e-translation".to_string(),
+                    timestamp_us: 0,
+                    format: Some(AudioFormat {
+                        sample_rate: SAMPLE_RATE,
+                        channels: CHANNELS as u32,
+                        format: SampleFormat::F32 as i32,
+                    }),
+                    frames: frames as u32,
+                    pcm,
+                })),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut committed_with_translation = 0usize;
+    let mut last_translated = String::new();
+
+    while committed_with_translation < 2 && Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Some(envelope)) => match envelope.payload {
+                Some(Payload::SubtitleEvent(e)) => {
+                    if e.kind == SubtitleKind::Committed as i32 && !e.translated_text.is_empty() {
+                        committed_with_translation += 1;
+                        last_translated = e.translated_text;
+                    }
+                }
+                Some(Payload::ErrorEvent(e)) => panic!("core reported an error: {}", e.message),
+                _ => {}
+            },
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+
+    assert!(
+        committed_with_translation >= 2,
+        "expected committed subtitles with translations, got {committed_with_translation}"
+    );
+    assert!(
+        last_translated.starts_with("[mock-zh]"),
+        "translation missing the mock marker: {last_translated}"
+    );
+
+    seq += 1;
+    write_frame(
+        &mut writer,
+        &Envelope {
+            seq,
+            payload: Some(Payload::StopSessionRequest(StopSessionRequest {
+                session_id: "e2e-translation".to_string(),
+            })),
+        },
+    )
+    .await
+    .unwrap();
+
+    reader_task.abort();
+    drop(writer);
+    let _ = child.kill();
+}

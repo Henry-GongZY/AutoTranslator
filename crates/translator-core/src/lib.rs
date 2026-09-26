@@ -10,6 +10,7 @@ pub mod error;
 pub mod ipc;
 pub mod session;
 pub mod subtitle;
+pub mod translation;
 pub mod vad;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

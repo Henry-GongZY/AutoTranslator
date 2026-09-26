@@ -65,8 +65,9 @@ message AsrConfig {
 }
 
 message TranslationConfig {
-  // "none" in phase 1.
+  // Providers: none | mock | apple-translate (Swift bridge, macOS).
   string provider = 1;
+  // BCP-47 target language, e.g. zh-Hans. Required for every provider but none.
   string target_language = 2;
 }
 

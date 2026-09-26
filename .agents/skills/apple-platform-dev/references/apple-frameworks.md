@@ -16,10 +16,18 @@
 ## Translation 框架（macOS 15+）
 
 - `TranslationSession` 提供设备端翻译；第一版 macOS 文本翻译后端的首选。
-- 支持情况必须按**实际语言对**通过 `LanguageAvailability` 查询。
+- 支持情况必须按**实际语言对**通过 `LanguageAvailability` 查询（macOS 15 SDK 是 `init()` + `status(from:to:)` async 方法，没有同步 `.status` 属性）。
 - 首次使用可能需要下载语言资产；缺少资产时仍需相应的下载交互（模型下载交互属于 macOS 客户端的职责，见 SKILL.md 架构图）。
-- macOS 26 增加了无需绑定 SwiftUI 视图的初始化方式，但前提是该语言已安装。
+- macOS 26 增加了无需绑定 SwiftUI 视图的初始化方式（`TranslationSession(installedSource:target:)`，要求源语言已安装），但前提是该语言已安装。
 - 与 ASR 后端选择完全解耦：识别用 Whisper Metal 时，翻译照样可以先用 Apple Translation。
+
+### 实测约束（2026-09，macOS 15.7 + SDK 26，M4）
+
+- 隐藏窗口 + `.translationTask` 在辅助进程内**能成功交付 `TranslationSession`**（`.prohibited` 策略、offscreen 1x1 window 即可）。
+- 但 `prepareTranslation()` 在辅助进程上下文**会永久挂起且不弹出任何确认框**（`.prohibited`/`.accessory`/`.regular` 三种策略都试过，CGWindowList 确认无 UI 呈现）——语言资产的下载交互只能由真正的客户端 UI 触发（如 Safari 翻译按钮），这正是"模型下载交互属于客户端"的原因。
+- 因此 `translator-bridge` 的契约：资产未安装时**快速失败**并给出可操作指引；`LanguageAvailability` 三态映射 installed=可用 / supported=可翻译但资产未装 / unsupported=系统不支持。
+- Rust 侧桥接客户端：Unix socket + JSON line 协议（`{"id","op","text","source","target"}`），连接失败/资产未装在会话启动即报错，不产生静默无译文字幕。
+- 验证脚本：`scripts/build-bridge.sh` 构建、`scripts/smoke-translation.py` 探测语言对与全链路（`--core` 参数走 core 全链路）。
 
 ## Foundation Models（通用大模型）
 

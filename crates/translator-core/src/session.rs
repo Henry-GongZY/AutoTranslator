@@ -2,12 +2,14 @@
 
 use translator_protocol::{
     AudioFormat, AudioFrame, MetricsEvent, SampleFormat, StartSessionRequest, SubtitleEvent,
+    SubtitleKind,
 };
 
 use crate::asr::{self, RecognitionEvent, SpeechRecognizer};
 use crate::audio::{downmix_to_mono, pcm, resampler::SincResampler};
 use crate::error::{CoreError, Result};
 use crate::subtitle::{SubtitleConfig, SubtitleStabilizer};
+use crate::translation::{self, Translator};
 use crate::vad::{Vad, VadConfig};
 
 const DEFAULT_TARGET_RATE: u32 = 16_000;
@@ -38,6 +40,10 @@ pub struct Session {
     resampler: Option<SincResampler>,
     vad: Vad,
     recognizer: Box<dyn SpeechRecognizer>,
+    /// Optional text translator; V1 translates only committed subtitles.
+    translator: Option<Box<dyn Translator>>,
+    /// BCP-47 source language reported on subtitle events (empty if unknown).
+    source_language: String,
     subtitles: SubtitleStabilizer,
     paused: bool,
     /// Accumulated audio time derived from the sample count, in microseconds.
@@ -86,16 +92,6 @@ impl Session {
             )));
         }
 
-        // Phase 1 ships without translation.
-        if let Some(translation) = &request.translation {
-            if !translation.provider.is_empty() && translation.provider != "none" {
-                return Err(CoreError::Unsupported(format!(
-                    "translation provider `{}` is not available in phase 1",
-                    translation.provider
-                )));
-            }
-        }
-
         let provider = request
             .asr
             .as_ref()
@@ -113,6 +109,38 @@ impl Session {
             initial_prompt: String::new(),
         };
         let recognizer = asr::create(provider, asr_opts).await?;
+
+        // Translation is chosen independently of the recognizer; an empty or
+        // "none" provider keeps it disabled. V1 requires an explicit source
+        // language: auto-detect plus a fixed target would mislabel pairs.
+        let (translator, source_language) = match request.translation.as_ref() {
+            None => (None, String::new()),
+            Some(cfg) if cfg.provider.is_empty() || cfg.provider == "none" => {
+                (None, String::new())
+            }
+            Some(cfg) => {
+                if cfg.target_language.is_empty() {
+                    return Err(CoreError::Unsupported(
+                        "translation provider requires `target_language`".into(),
+                    ));
+                }
+                if asr_cfg.language.is_empty() {
+                    return Err(CoreError::Unsupported(
+                        "translation requires an explicit ASR `language` as the source side"
+                            .into(),
+                    ));
+                }
+                let translator = translation::create(
+                    &cfg.provider,
+                    translation::TranslatorOptions {
+                        source_language: asr_cfg.language.clone(),
+                        target_language: cfg.target_language.clone(),
+                    },
+                )
+                .await?;
+                (Some(translator), asr_cfg.language.clone())
+            }
+        };
 
         let subtitle_cfg = match &request.subtitle {
             Some(cfg) => SubtitleConfig {
@@ -162,6 +190,8 @@ impl Session {
             resampler,
             vad: Vad::new(VadConfig::new(target_rate)),
             recognizer,
+            translator,
+            source_language,
             subtitles: SubtitleStabilizer::new(subtitle_cfg),
             paused: false,
             audio_us: 0.0,
@@ -254,23 +284,7 @@ impl Session {
 
         let events = self.recognizer.push_audio(&work, vad.active, end_us, infer_partial).await?;
         for event in events {
-            let subtitle = match event {
-                RecognitionEvent::Partial {
-                    text,
-                    start_us,
-                    end_us,
-                } => self.subtitles.on_partial(&text, start_us, end_us, &self.id),
-                RecognitionEvent::Final {
-                    text,
-                    start_us,
-                    end_us,
-                    confidence,
-                } => self
-                    .subtitles
-                    .on_final(&text, start_us, end_us, confidence, &self.id),
-            };
-            if let Some(subtitle) = subtitle {
-                self.metrics.subtitle_events += 1;
+            if let Some(subtitle) = self.finalize(event).await {
                 output.subtitles.push(subtitle);
             }
         }
@@ -284,28 +298,48 @@ impl Session {
         Ok(output)
     }
 
+    /// Convert a recognition event into a display subtitle. Committed text is
+    /// sent through the translator when one is attached; a translation failure
+    /// degrades to an untranslated subtitle and never interrupts the pipeline.
+    async fn finalize(&mut self, event: RecognitionEvent) -> Option<SubtitleEvent> {
+        let mut subtitle = match event {
+            RecognitionEvent::Partial {
+                text,
+                start_us,
+                end_us,
+            } => self.subtitles.on_partial(&text, start_us, end_us, &self.id),
+            RecognitionEvent::Final {
+                text,
+                start_us,
+                end_us,
+                confidence,
+            } => self
+                .subtitles
+                .on_final(&text, start_us, end_us, confidence, &self.id),
+        }?;
+
+        if subtitle.kind == SubtitleKind::Committed as i32 {
+            if let Some(translator) = self.translator.as_mut() {
+                match translator.translate(&subtitle.text).await {
+                    Ok(translated) if !translated.is_empty() => {
+                        subtitle.translated_text = translated;
+                        subtitle.language = self.source_language.clone();
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(session = %self.id, "translation failed: {e}"),
+                }
+            }
+        }
+        self.metrics.subtitle_events += 1;
+        Some(subtitle)
+    }
+
     /// Flush any buffered recognition result and return the final subtitles.
     pub async fn flush(&mut self) -> Result<Vec<SubtitleEvent>> {
         let events = self.recognizer.flush().await?;
         let mut out = Vec::new();
         for event in events {
-            let subtitle = match event {
-                RecognitionEvent::Partial {
-                    text,
-                    start_us,
-                    end_us,
-                } => self.subtitles.on_partial(&text, start_us, end_us, &self.id),
-                RecognitionEvent::Final {
-                    text,
-                    start_us,
-                    end_us,
-                    confidence,
-                } => self
-                    .subtitles
-                    .on_final(&text, start_us, end_us, confidence, &self.id),
-            };
-            if let Some(subtitle) = subtitle {
-                self.metrics.subtitle_events += 1;
+            if let Some(subtitle) = self.finalize(event).await {
                 out.push(subtitle);
             }
         }
