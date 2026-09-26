@@ -91,6 +91,7 @@ impl SpeechRecognizer for MockRecognizer {
         _samples: &[f32],
         speech: bool,
         end_us: u64,
+        _infer_partial: bool,
     ) -> Result<Vec<RecognitionEvent>> {
         let mut events = Vec::new();
 

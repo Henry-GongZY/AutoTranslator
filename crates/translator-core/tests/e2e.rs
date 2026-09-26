@@ -1,12 +1,10 @@
 //! End-to-end check: spawn the real `translator-core` binary, feed it synthetic
-//! system audio over a named pipe and assert that subtitles come back.
-
-#![cfg(windows)]
+//! system audio over the platform's local transport (Windows named pipe /
+//! Unix domain socket) and assert that subtitles come back.
 
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use translator_protocol::envelope::Payload;
 use translator_protocol::framing::{read_frame, write_frame};
 use translator_protocol::{
@@ -22,14 +20,37 @@ fn core_binary() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_translator-core"))
 }
 
+#[cfg(windows)]
+fn endpoint_arg(pipe: &str) -> [String; 2] {
+    ["--pipe".to_string(), pipe.to_string()]
+}
+
+#[cfg(unix)]
+fn endpoint_arg(socket: &str) -> [String; 2] {
+    ["--socket".to_string(), socket.to_string()]
+}
+
+#[cfg(windows)]
 fn spawn_core(pipe: &str) -> Child {
     Command::new(core_binary())
-        .args(["--pipe", pipe, "--log-level", "warn"])
+        .args(endpoint_arg(pipe))
+        .args(["--log-level", "warn"])
         .spawn()
         .expect("failed to spawn translator-core")
 }
 
-fn connect_with_retry(pipe: &str) -> NamedPipeClient {
+#[cfg(unix)]
+fn spawn_core(socket: &str) -> Child {
+    Command::new(core_binary())
+        .args(endpoint_arg(socket))
+        .args(["--log-level", "warn"])
+        .spawn()
+        .expect("failed to spawn translator-core")
+}
+
+#[cfg(windows)]
+fn connect_with_retry(pipe: &str) -> tokio::net::windows::named_pipe::NamedPipeClient {
+    use tokio::net::windows::named_pipe::ClientOptions;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         match ClientOptions::new().open(pipe) {
@@ -38,6 +59,23 @@ fn connect_with_retry(pipe: &str) -> NamedPipeClient {
                 assert!(
                     Instant::now() < deadline,
                     "core never started listening on {pipe}: {e}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn connect_with_retry(socket: &str) -> tokio::net::UnixStream {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match tokio::net::UnixStream::connect(socket).await {
+            Ok(client) => return client,
+            Err(e) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "core never started listening on {socket}: {e}"
                 );
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -60,10 +98,14 @@ fn burst(seconds: f64, amplitude: f32, phase: &mut f64) -> Vec<f32> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn streams_subtitles_over_a_named_pipe() {
-    let pipe = format!(r"\\.\pipe\translator-core-e2e-{}", std::process::id());
-    let mut child = spawn_core(&pipe);
-    let client = connect_with_retry(&pipe);
+async fn streams_subtitles_over_local_transport() {
+    #[cfg(windows)]
+    let endpoint = format!(r"\\.\pipe\translator-core-e2e-{}", std::process::id());
+    #[cfg(unix)]
+    let endpoint = format!("/tmp/translator-core-e2e-{}.sock", std::process::id());
+
+    let mut child = spawn_core(&endpoint);
+    let client = connect_with_retry(&endpoint).await;
 
     let (mut reader, mut writer) = tokio::io::split(client);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Envelope>();
@@ -221,8 +263,8 @@ async fn streams_subtitles_over_a_named_pipe() {
     .await
     .unwrap();
 
-    // Both halves of `split` must go away before the OS closes the pipe handle
-    // and the core notices the client is gone.
+    // Both halves of `split` must go away before the OS closes the transport
+    // handle and the core notices the client is gone.
     reader_task.abort();
     drop(writer);
 

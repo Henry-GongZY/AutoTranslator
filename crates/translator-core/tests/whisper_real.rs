@@ -83,7 +83,7 @@ async fn transcribes_speech_wav() {
     let mut transcript = String::new();
 
     for frame in samples.chunks(chunk) {
-        let events = asr.push_audio(frame, true, end_us).await.unwrap();
+        let events = asr.push_audio(frame, true, end_us, true).await.unwrap();
         for event in events {
             if let RecognitionEvent::Final { text, .. } = event {
                 transcript.push_str(&text);

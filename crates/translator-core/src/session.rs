@@ -187,7 +187,10 @@ impl Session {
         self.paused
     }
 
-    pub async fn push_frame(&mut self, frame: AudioFrame) -> Result<SessionOutput> {
+    /// `infer_partial` is passed through to the recogniser: when the caller
+    /// has more audio queued it passes `false` so stale mid-utterance decodes
+    /// merge into the newest one (see `SpeechRecognizer::push_audio`).
+    pub async fn push_frame(&mut self, frame: AudioFrame, infer_partial: bool) -> Result<SessionOutput> {
         let mut output = SessionOutput::default();
         self.metrics.audio_frames += 1;
         self.metrics.audio_bytes += frame.pcm.len() as u64;
@@ -249,7 +252,7 @@ impl Session {
         self.metrics.speech_frames += vad.speech_frames as u64;
         self.metrics.total_frames += vad.completed_frames as u64;
 
-        let events = self.recognizer.push_audio(&work, vad.active, end_us).await?;
+        let events = self.recognizer.push_audio(&work, vad.active, end_us, infer_partial).await?;
         for event in events {
             let subtitle = match event {
                 RecognitionEvent::Partial {

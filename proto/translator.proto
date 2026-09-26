@@ -58,7 +58,7 @@ message AsrConfig {
   string model = 2;
   // BCP-47 tag, empty means auto-detect.
   string language = 3;
-  // Explicit whisper.cpp backend: cpu, blas, vulkan, cuda; empty = build default.
+  // Explicit whisper.cpp backend: cpu, blas, vulkan, cuda, metal; empty = build default.
   string engine = 4;
   // Shared local model directory; empty = core default.
   string model_directory = 5;

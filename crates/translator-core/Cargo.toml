@@ -16,6 +16,10 @@ whisper = ["dep:whisper-rs", "dep:reqwest"]
 cuda = ["whisper", "whisper-rs/cuda"]
 blas = ["whisper", "whisper-rs/openblas"]
 vulkan = ["whisper", "whisper-rs/vulkan"]
+# Build the core with the whisper.cpp Metal backend (macOS / Apple Silicon).
+# whisper-rs-sys compiles GGML_METAL with the shader library embedded, so the
+# resulting binary is self-contained — no runtime .metallib to ship.
+metal = ["whisper", "whisper-rs/metal"]
 
 [dependencies]
 translator-protocol.workspace = true
