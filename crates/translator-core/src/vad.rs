@@ -158,6 +158,22 @@ mod tests {
         assert!(!result.active, "gate should close after 1 s of silence");
     }
 
+
+    #[test]
+    fn closes_after_a_realistic_utterance_silence() {
+        let rate = 16000u32;
+        let mut vad = Vad::new(VadConfig::new(rate));
+        let mut clock = 0u64;
+        let tone: Vec<f32> = (0..19200).map(|i| 0.4 * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / rate as f64) as f32).collect();
+        let quiet: Vec<f32> = vec![0.00001; 8000];
+        let mut open = false;
+        for chunk in tone.chunks(1600) { clock += chunk.len() as u64 * 1_000_000 / rate as u64; open = vad.push(chunk, clock).active; }
+        println!("after tone: active={open}");
+        for chunk in quiet.chunks(1600) { clock += chunk.len() as u64 * 1_000_000 / rate as u64; open = vad.push(chunk, clock).active; }
+        println!("after 0.5s quiet: active={open}");
+        assert!(!open);
+    }
+
     #[test]
     fn stays_closed_on_silence() {
         let rate = 16000;
