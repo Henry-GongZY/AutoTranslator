@@ -79,7 +79,8 @@ final class SessionController: ObservableObject {
         errorMessage = ""
         guard !running else { return }
         appLog("[ui] start pressed (source=\(sourceLanguage) target=\(targetLanguage) provider=\(translationProvider) asr=\(asrProvider) model=\(model))")
-        if asrProvider == "apple-speech" {
+        // apple-speech 识别和 apple-translate 翻译都走同一个桥接进程。
+        if asrProvider == "apple-speech" || translationProvider == "apple-translate" {
             do { try ensureBridge() } catch {
                 errorMessage = error.localizedDescription
                 return

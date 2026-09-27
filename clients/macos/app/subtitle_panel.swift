@@ -1,5 +1,10 @@
 // Floating subtitle overlay: a non-activating panel that joins all spaces so
 // captions stay visible over video players and full-screen apps.
+//
+// Window chrome: titled style with a fully transparent, hidden title bar —
+// the user gets native drag, native edge-resize and working close/miniaturize
+// buttons, while the caption card keeps its borderless look. Everything is in
+// points, so display scaling (HiDPI) needs no special handling.
 
 import AppKit
 import SwiftUI
@@ -58,16 +63,23 @@ struct SubtitleOverlayView: View {
                 }
             }
             if model.rows.isEmpty {
-                Text("等待语音…")
-                    .font(.system(size: 15))
+                Text("等待语音…（拖动窗口调整位置，拖边缘改变大小）")
+                    .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.4))
             }
         }
-        .padding(14)
-        // The user resizes the panel itself; content follows.
+        .padding(.top, 30) // traffic-light buttons live in this zone
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.62)))
+        .background(Color.black.opacity(0.62))
     }
+}
+
+/// Hosting view that lets `isMovableByWindowBackground` work through SwiftUI
+/// content (the default hosting view reports a non-movable background).
+final class OverlayHostingView: NSHostingView<SubtitleOverlayView> {
+    override var mouseDownCanMoveWindow: Bool { true }
 }
 
 @MainActor
@@ -79,26 +91,29 @@ final class SubtitlePanelController {
 
     init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 160),
-            styleMask: [.borderless, .nonactivatingPanel, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 200),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
+        panel.title = "AutoTranslator 字幕"
+        // Transparent hidden titlebar: native chrome (drag zone, resize edges,
+        // traffic lights) without a visible bar.
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.isMovable = false
-        // Drag anywhere on the panel moves it; .resizable gives invisible
-        // edge hit zones for resizing; both work without activating the app.
+        panel.isMovable = true
         panel.isMovableByWindowBackground = true
-        panel.contentMinSize = NSSize(width: 280, height: 120)
+        panel.contentMinSize = NSSize(width: 300, height: 140)
         panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: SubtitleOverlayView(model: model))
-        // Restores the user's last position and size; the default frame from
-        // contentRect is the first-run fallback.
+        panel.contentView = OverlayHostingView(rootView: SubtitleOverlayView(model: model))
+        // Restores the user's last position and size; the first-run default
+        // adapts to the display's point size (HiDPI-safe: all in points).
         panel.setFrameAutosaveName(Self.autosaveName)
         if UserDefaults.standard.object(forKey: "NSWindow Frame \(Self.autosaveName)") == nil {
             position()
@@ -125,7 +140,16 @@ final class SubtitlePanelController {
 
     private func position() {
         guard let screen = NSScreen.main?.visibleFrame else { return }
-        let width: CGFloat = 480
-        panel.setFrameOrigin(NSPoint(x: screen.maxX - width - 24, y: screen.minY + 96))
+        let width = min(560, max(380, screen.width / 4))
+        let height: CGFloat = 200
+        panel.setFrame(
+            NSRect(
+                x: screen.maxX - width - 24,
+                y: screen.minY + 96,
+                width: width,
+                height: height
+            ),
+            display: true
+        )
     }
 }
