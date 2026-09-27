@@ -308,7 +308,7 @@ func process(req: BridgeRequest, service: TranslationService, asr: SpeechRecogni
         }
 
     case "asr-feed":
-        guard let b64 = req.text, let bytes = Data(base64Encoded: b64), let pending = pending else {
+        guard let b64 = req.text, let bytes = Data(base64Encoded: b64), pending != nil else {
             return BridgeResponse(id: req.id, ok: false, error: "asr-feed requires base64 pcm")
         }
         do {

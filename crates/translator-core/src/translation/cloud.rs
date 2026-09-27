@@ -23,7 +23,7 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 const CACHE_CAP: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Provider {
+pub enum Provider {
     OpenAi,
     DeepL,
     Google,
@@ -31,7 +31,7 @@ pub(crate) enum Provider {
 }
 
 impl Provider {
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
+    pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "openai" => Some(Self::OpenAi),
             "deepl" => Some(Self::DeepL),

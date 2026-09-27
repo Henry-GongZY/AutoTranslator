@@ -48,17 +48,11 @@ struct AsrEvent {
     end_us: u64,
 }
 
-enum BridgeMessage {
-    Reply(BridgeReply),
-    Event(AsrEvent),
-}
-
 pub struct AppleSpeechAsr {
     writer: OwnedWriteHalf,
     replies: mpsc::Receiver<BridgeReply>,
     events: mpsc::Receiver<AsrEvent>,
     next_id: u64,
-    session_id: String,
     locale: String,
     /// Bridge media clock -> core session clock offset, learned from the
     /// first pushed frame (events carry times measured from asr-start).
@@ -129,7 +123,6 @@ impl AppleSpeechAsr {
             replies,
             events,
             next_id: 0,
-            session_id: String::new(),
             locale: opts.language.clone(),
             clock_origin_us: None,
             current_partial: String::new(),

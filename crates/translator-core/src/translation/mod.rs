@@ -12,6 +12,8 @@
 //! macOS 15 needs a SwiftUI view to obtain a `TranslationSession`; the core
 //! only sees a socket. See `scripts/build-bridge.sh`.
 
+// Apple bridge client speaks Unix domain sockets and only exists on macOS.
+#[cfg(unix)]
 pub mod apple;
 pub mod cloud;
 pub mod mock;
@@ -52,7 +54,12 @@ pub trait Translator: Send + Sync {
 pub async fn create(provider: &str, opts: TranslatorOptions) -> Result<Box<dyn Translator>> {
     match provider {
         "mock" => Ok(Box::new(mock::MockTranslator)),
+        #[cfg(unix)]
         "apple-translate" => Ok(Box::new(apple::AppleTranslator::connect(opts).await?)),
+        #[cfg(not(unix))]
+        "apple-translate" => Err(CoreError::Unsupported(
+            "translation provider `apple-translate` requires macOS (Swift bridge)".into(),
+        )),
         "openai" | "deepl" | "google" | "baidu" => {
             let p = cloud::Provider::from_name(provider).ok_or_else(|| {
                 CoreError::Unsupported(format!("unknown cloud provider `{provider}`"))

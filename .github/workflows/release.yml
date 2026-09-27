@@ -108,8 +108,11 @@ jobs:
             target/installer/AutoTranslatorSetup-x64-*.exe
             target/Translator-windows-x64-portable.zip
 
+  # SDK 26 required: the bridge compiles SpeechAnalyzer / Translation
+  # direct-init APIs that do not exist in the macOS 15 SDK. Runtime floor
+  # stays macOS 15 via the #available gates.
   macos:
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
       # Virtualized arm64 runners: -mcpu=native feature macros disagree with

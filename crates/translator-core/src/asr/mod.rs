@@ -1,5 +1,7 @@
 //! Speech recognition provider abstraction.
 
+// Apple bridge clients speak Unix domain sockets and only exist on macOS.
+#[cfg(unix)]
 pub mod apple_speech;
 pub mod mock;
 
@@ -99,9 +101,14 @@ pub async fn create(provider: &str, opts: AsrOptions) -> Result<Box<dyn SpeechRe
         )),
 
         // True streaming via SpeechAnalyzer (macOS 26+, through the Swift
-        // bridge); fails fast with a clear state on older systems so the
-        // session can fall back to whisper.
+        // bridge); fails fast with a clear state on older or non-Apple
+        // systems so the session can fall back to whisper.
+        #[cfg(unix)]
         "apple-speech" => Ok(Box::new(apple_speech::AppleSpeechAsr::connect(opts).await?)),
+        #[cfg(not(unix))]
+        "apple-speech" => Err(CoreError::Unsupported(
+            "asr provider `apple-speech` requires macOS 26+ (SpeechAnalyzer via the Swift bridge)".into(),
+        )),
 
         other => Err(CoreError::Unsupported(format!(
             "asr provider `{other}` is not wired up (known: `mock`, `whisper`, `apple-speech`)"
