@@ -35,6 +35,8 @@ final class SessionController: ObservableObject {
     @Published var translationProvider = "apple-translate" // "none" | "apple-translate"
     @Published var model = "tiny"
     @Published var showSubtitlePanel = true
+    @Published var overlayAlwaysOnTop =
+        UserDefaults.standard.object(forKey: "OverlayAlwaysOnTop") as? Bool ?? true
     @Published var assetStatusText = "未检测"
     /// Non-nil while the system asset-download flow should run (drives the
     /// translationTask in the control view).
@@ -299,6 +301,8 @@ struct ControlView: View {
                 }
                 Toggle("字幕悬浮窗", isOn: $controller.showSubtitlePanel)
                     .toggleStyle(.checkbox)
+                Toggle("置顶", isOn: $controller.overlayAlwaysOnTop)
+                    .toggleStyle(.checkbox)
             }
 
             Text(controller.statusText)
@@ -321,6 +325,10 @@ struct ControlView: View {
         .frame(width: 420, alignment: .leading)
         .onChange(of: controller.showSubtitlePanel) { _, shown in
             if shown { controller.panel.show() } else { controller.panel.hide() }
+        }
+        .onChange(of: controller.overlayAlwaysOnTop) { _, topmost in
+            controller.panel.setAlwaysOnTop(topmost)
+            UserDefaults.standard.set(topmost, forKey: "OverlayAlwaysOnTop")
         }
         .onAppear { controller.refreshAssetStatus() }
         // The system language-asset download prompt attaches here, in a real

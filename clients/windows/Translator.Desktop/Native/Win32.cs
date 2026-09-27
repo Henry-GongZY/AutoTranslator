@@ -41,6 +41,21 @@ internal static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ClientToScreen(nint hwnd, ref NativePoint point);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    // Non-client hit-test values for the move/resize drag tricks.
+    public const uint WmNclButtonDown = 0x00A1;
+    public const nint HtCaption = 2;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct NativeRect { public int Left, Top, Right, Bottom; }
 

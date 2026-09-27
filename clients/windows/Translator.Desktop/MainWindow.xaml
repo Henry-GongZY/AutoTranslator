@@ -112,7 +112,8 @@
                             <NumberBox x:Name="MaxLinesBox" Header="最多显示行数" Minimum="1" Maximum="4" Value="2" SpinButtonPlacementMode="Compact" />
                             <NumberBox x:Name="MaxCharsBox" Grid.Column="1" Header="每行字符数" Minimum="10" Maximum="120" Value="42" SpinButtonPlacementMode="Compact" />
                         </Grid>
-                        <CheckBox x:Name="ClickThroughBox" Content="鼠标穿透字幕，不影响下方操作" IsChecked="True" Checked="OnClickThroughChanged" Unchecked="OnClickThroughChanged" />
+                        <CheckBox x:Name="TopmostBox" Content="字幕固定在最上方窗口" IsChecked="True" Checked="OnTopmostChanged" Unchecked="OnTopmostChanged" />
+                        <CheckBox x:Name="ClickThroughBox" Content="锁定悬浮窗（鼠标穿透；取消勾选后可拖动移动、拖边缘调整大小）" IsChecked="True" Checked="OnClickThroughChanged" Unchecked="OnClickThroughChanged" />
                         <TextBlock Text="本地识别无需上传音频。选择模型后，缺失文件会自动下载至指定文件夹；演示模式仅显示模拟字幕。" TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Expander>

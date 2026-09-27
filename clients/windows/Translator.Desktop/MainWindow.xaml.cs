@@ -28,6 +28,10 @@ public sealed partial class MainWindow : Window
             workArea.Y + (workArea.Height - height) / 2, width, height));
         _overlay = new SubtitleOverlayWindow();
         _overlay.Activate();
+        // The overlay already applied its persisted frame/topmost; the boxes
+        // here just mirror and feed future changes back.
+        TopmostBox.IsChecked = OverlaySettingsStore.Load().Topmost;
+        ClickThroughBox.IsChecked = OverlaySettingsStore.Load().Locked;
         _overlay.SetClickThrough(ClickThroughBox.IsChecked == true);
         _controller.SubtitlesChanged += OnSubtitlesChanged;
         _controller.StatusChanged += OnStatusChanged;
@@ -139,6 +143,9 @@ public sealed partial class MainWindow : Window
 
     private void OnClickThroughChanged(object sender, RoutedEventArgs e) =>
         _overlay?.SetClickThrough(ClickThroughBox.IsChecked == true);
+
+    private void OnTopmostChanged(object sender, RoutedEventArgs e) =>
+        _overlay?.SetTopmost(TopmostBox.IsChecked == true);
 
     private void OnSubtitlesChanged(IReadOnlyList<string> lines, bool hasPartial)
     {

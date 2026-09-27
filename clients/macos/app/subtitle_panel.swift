@@ -64,7 +64,8 @@ struct SubtitleOverlayView: View {
             }
         }
         .padding(14)
-        .frame(width: 460, alignment: .leading)
+        // The user resizes the panel itself; content follows.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.62)))
     }
 }
@@ -74,10 +75,12 @@ final class SubtitlePanelController {
     private let panel: NSPanel
     let model = SubtitleModel()
 
+    private static let autosaveName = "SubtitleOverlay"
+
     init() {
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 160),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -88,9 +91,24 @@ final class SubtitlePanelController {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.isMovable = false
+        // Drag anywhere on the panel moves it; .resizable gives invisible
+        // edge hit zones for resizing; both work without activating the app.
+        panel.isMovableByWindowBackground = true
+        panel.contentMinSize = NSSize(width: 280, height: 120)
         panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: SubtitleOverlayView(model: model))
-        position()
+        // Restores the user's last position and size; the default frame from
+        // contentRect is the first-run fallback.
+        panel.setFrameAutosaveName(Self.autosaveName)
+        if UserDefaults.standard.object(forKey: "NSWindow Frame \(Self.autosaveName)") == nil {
+            position()
+        }
+        setAlwaysOnTop(
+            UserDefaults.standard.object(forKey: "OverlayAlwaysOnTop") as? Bool ?? true)
+    }
+
+    func setAlwaysOnTop(_ topmost: Bool) {
+        panel.level = topmost ? .floating : .normal
     }
 
     func show() {

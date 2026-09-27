@@ -12,23 +12,59 @@
     <Grid x:Name="Root" Background="#FF000000">
         <Border
             x:Name="CaptionBorder"
-            Margin="0,0,0,28"
-            Padding="24,16"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Bottom"
+            Margin="10"
+            Padding="24,14"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
             Background="#FF202020"
             BorderBrush="#FF404040"
             BorderThickness="1"
             CornerRadius="12"
             Visibility="Collapsed">
-            <TextBlock
-                x:Name="CaptionText"
-                MaxWidth="1040"
-                FontSize="24"
-                LineHeight="34"
-                Foreground="#FFF5F5F5"
-                TextAlignment="Center"
-                TextWrapping="Wrap" />
+            <Grid x:Name="CardRoot" PointerPressed="OnCardPointerPressed">
+                <TextBlock
+                    x:Name="CaptionText"
+                    MaxWidth="1040"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="24"
+                    LineHeight="34"
+                    Foreground="#FFF5F5F5"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+
+                <!--
+                    Edge/corner resize grips, only hit-testable while the
+                    overlay is unlocked. Order matters: corners go last so
+                    they win the hit test over the plain edges.
+                -->
+                <Grid x:Name="Grips" Visibility="Collapsed">
+                    <Border Tag="Left" Width="12" HorizontalAlignment="Left" VerticalAlignment="Stretch" Margin="0,18" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="Right" Width="12" HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,18" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="Top" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="18,0" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="Bottom" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="18,0" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="TopLeft" Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="TopRight" Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="BottomLeft" Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                    <Border Tag="BottomRight" Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="Transparent"
+                            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased"
+                            PointerEntered="OnGripEntered" PointerExited="OnGripExited" />
+                </Grid>
+            </Grid>
         </Border>
     </Grid>
 </Window>
