@@ -37,12 +37,16 @@ final class SessionController: ObservableObject {
     @Published var showSubtitlePanel = true
     @Published var overlayAlwaysOnTop =
         UserDefaults.standard.object(forKey: "OverlayAlwaysOnTop") as? Bool ?? true
+    /// ASR engine: whisper everywhere; apple-speech requires macOS 26 and
+    /// fails the session with a clear state when unavailable (core-side gate).
+    @Published var asrProvider = "whisper"
     @Published var assetStatusText = "未检测"
     /// Non-nil while the system asset-download flow should run (drives the
     /// translationTask in the control view).
     @Published var installConfig: TranslationSession.Configuration?
 
     private var link: CoreLink?
+    private var bridgeProcess: Process?
     private let capture = SystemAudioCapture()
     let panel = SubtitlePanelController()
     private var heartbeatTimer: Timer?
@@ -52,6 +56,7 @@ final class SessionController: ObservableObject {
         // Test/deployment overrides: AUTOTRANSLATOR_PROVIDER/SOURCE/TARGET/MODEL
         let env = ProcessInfo.processInfo.environment
         if let v = env["AUTOTRANSLATOR_PROVIDER"], !v.isEmpty { translationProvider = v }
+        if let v = env["AUTOTRANSLATOR_ASR"], !v.isEmpty { asrProvider = v }
         if let v = env["AUTOTRANSLATOR_SOURCE"], !v.isEmpty { sourceLanguage = v }
         if let v = env["AUTOTRANSLATOR_TARGET"], !v.isEmpty { targetLanguage = v }
         if let v = env["AUTOTRANSLATOR_MODEL"], !v.isEmpty { model = v }
@@ -73,10 +78,20 @@ final class SessionController: ObservableObject {
     func start() {
         errorMessage = ""
         guard !running else { return }
-        appLog("[ui] start pressed (source=\(sourceLanguage) target=\(targetLanguage) provider=\(translationProvider) model=\(model))")
+        appLog("[ui] start pressed (source=\(sourceLanguage) target=\(targetLanguage) provider=\(translationProvider) asr=\(asrProvider) model=\(model))")
+        if asrProvider == "apple-speech" {
+            do { try ensureBridge() } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
 
         if translationProvider != "none" && sourceLanguage.isEmpty {
             errorMessage = "翻译需要明确的源语言；选“自动检测”时请先把翻译关掉。"
+            return
+        }
+        if asrProvider == "apple-speech" && sourceLanguage.isEmpty {
+            errorMessage = "Apple 系统识别不支持自动检测语言，请选择源语言。"
             return
         }
         // No CGPreflight gate here: on macOS 15 CGRequestScreenCaptureAccess
@@ -112,6 +127,8 @@ final class SessionController: ObservableObject {
         capture.stop()
         link?.shutdown()
         link = nil
+        bridgeProcess?.terminate()
+        bridgeProcess = nil
     }
 
     // MARK: events from the core link
@@ -123,13 +140,13 @@ final class SessionController: ObservableObject {
             statusText = "已连接 core（\(features.contains("asr.whisper.engine.metal") ? "Metal 引擎" : "CPU 引擎")），正在启动会话…"
             let cfg = SessionConfig(
                 sessionId: "mac-\(UUID().uuidString.prefix(8))",
-                asrProvider: "whisper",
+                asrProvider: asrProvider,
                 inputRate: 48_000,
                 inputChannels: 2,
                 sourceLanguage: sourceLanguage,
                 targetLanguage: targetLanguage,
                 translationProvider: translationProvider,
-                model: model
+                model: asrProvider == "whisper" ? model : ""
             )
             link?.startSession(cfg)
 
@@ -248,6 +265,37 @@ final class SessionController: ObservableObject {
 
     // MARK: helpers
 
+    /// Spawn the Swift bridge when it is not already running: the apple-speech
+    /// and apple-translate providers both talk to it over its socket.
+    private func ensureBridge() throws {
+        if FileManager.default.fileExists(atPath: "/tmp/translator-bridge-v1.sock") {
+            // Assume a live bridge; a stale socket fails fast on connect.
+            return
+        }
+        let binary = ProcessInfo.processInfo.environment["TRANSLATOR_BRIDGE_BIN"]
+            ?? Bundle.main.path(forResource: "translator-bridge", ofType: nil)
+            ?? "target/translator-bridge"
+        guard FileManager.default.fileExists(atPath: binary) else {
+            throw CoreLinkError.spawnFailed("translator-bridge 不存在（\(binary)），请运行 scripts/build-bridge.sh")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        if let stderr = FileHandle(forWritingAtPath: "/tmp/translator-bridge-mac.log") {
+            stderr.seekToEndOfFile()
+            process.standardError = stderr
+        } else {
+            FileManager.default.createFile(atPath: "/tmp/translator-bridge-mac.log", contents: nil)
+            if let stderr = FileHandle(forWritingAtPath: "/tmp/translator-bridge-mac.log") {
+                process.standardError = stderr
+            }
+        }
+        try process.run()
+        bridgeProcess = process
+        appLog("[bridge] spawned \(binary)")
+        // Give the socket a moment; the provider's connect has its own retry.
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
     private func resolveCoreBinary() -> String {
         if let env = ProcessInfo.processInfo.environment["TRANSLATOR_CORE_BIN"], !env.isEmpty {
             return env
@@ -279,9 +327,15 @@ struct ControlView: View {
                     Text(item.label).tag(item.id)
                 }
             }
-            Picker("识别模型", selection: $controller.model) {
-                ForEach(controller.models, id: \.id) { item in
-                    Text(item.label).tag(item.id)
+            Picker("识别引擎", selection: $controller.asrProvider) {
+                Text("Whisper（本地 Metal 推理）").tag("whisper")
+                Text("Apple 系统识别（需 macOS 26）").tag("apple-speech")
+            }
+            if controller.asrProvider == "whisper" {
+                Picker("识别模型", selection: $controller.model) {
+                    ForEach(controller.models, id: \.id) { item in
+                        Text(item.label).tag(item.id)
+                    }
                 }
             }
             Picker("翻译", selection: $controller.translationProvider) {

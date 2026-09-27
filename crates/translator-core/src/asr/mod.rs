@@ -1,5 +1,6 @@
 //! Speech recognition provider abstraction.
 
+pub mod apple_speech;
 pub mod mock;
 
 #[cfg(feature = "whisper")]
@@ -97,8 +98,13 @@ pub async fn create(provider: &str, opts: AsrOptions) -> Result<Box<dyn SpeechRe
             "asr provider `whisper` requires the `whisper` feature (and a CUDA/CPU build)".into(),
         )),
 
+        // True streaming via SpeechAnalyzer (macOS 26+, through the Swift
+        // bridge); fails fast with a clear state on older systems so the
+        // session can fall back to whisper.
+        "apple-speech" => Ok(Box::new(apple_speech::AppleSpeechAsr::connect(opts).await?)),
+
         other => Err(CoreError::Unsupported(format!(
-            "asr provider `{other}` is not wired up in phase 1 (only `mock` and `whisper` exist)"
+            "asr provider `{other}` is not wired up (known: `mock`, `whisper`, `apple-speech`)"
         ))),
     }
 }

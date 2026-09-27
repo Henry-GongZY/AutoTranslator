@@ -60,6 +60,12 @@ swiftc -O -swift-version 5 \
 
 cp "$repo/engines/metal/translator-core" "$res_dir/translator-core"
 
+# Bundle the Swift bridge (apple-speech / apple-translate providers need it).
+if [[ ! -x "$repo/target/translator-bridge" ]]; then
+  ./scripts/build-bridge.sh
+fi
+cp "$repo/target/translator-bridge" "$res_dir/translator-bridge"
+
 # Sign with a real identity so the Screen Recording TCC grant survives
 # rebuilds (ad-hoc signatures change on every build and invalidate it).
 identity="$(security find-identity -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')"

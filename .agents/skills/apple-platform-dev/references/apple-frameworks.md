@@ -4,6 +4,8 @@
 
 ## SpeechAnalyzer + SpeechTranscriber（macOS 26+）
 
+> 2026-09-27 已在 macOS 27 实机完成端到端验证（SCK 采集 → 桥接 → SpeechTranscriber → 字幕），实现见 `asr/apple_speech.rs` + 桥接 asr-* ops。
+
 - Apple 明确将它定位为**长音频、会议、低延迟实时转写**方案；模型在设备端运行，通过 `AssetInventory` 管理。
 - 与本项目"持续系统音频字幕"场景高度匹配的关键能力：**直接消费音频流、异步输出识别结果**——可以避开现有"整窗重复解码"（`WINDOW_SECONDS`/`STEP_SECONDS`）方案的重复计算。
 - 输入流与结果流彼此独立：这是要求演进 `SpeechRecognizer` 接口为"持续送入音频 + 独立接收识别事件"的直接原因（见 `crates/translator-core/src/asr/mod.rs:59-78`）。
@@ -46,6 +48,13 @@
 - WhisperKit：第三方（非 Apple 官方），适合需要**自带可固定版本模型**并深入优化 Core ML 的场景；当前项目的非必选项。
 - MLX：Apple 开源 ML 框架，面向 CPU/GPU 与统一内存；**不能把使用 MLX 等同于使用 ANE**。
 - 两者都只在有明确需求时引入（路线图第 4 步之后）。
+
+### 实测坑（SpeechTranscriber 集成）
+
+- **bestAvailableAudioFormat 是 16 kHz Int16 单声道**（不是 whisper 的 f32），桥接侧要做 f32→Int16 转换。
+- **媒体时钟必须按样本计数**（`CMTime(value: samples, timescale: sampleRate)`）：按微秒累计会在重采样热身块（如 795 样本 = 49687.5µs）上截断，analyzer 取整后判定"时间戳重叠/先于前序输入"（SFSpeechError 17）杀掉 results 流。最小复现用整块不触发，真实变长块必触发。
+- 资产安装：`AssetInventory.assetInstallationRequest(supporting:)` → `downloadAndInstall()`；`installedLocales`/`supportedLocale(equivalentTo:)` 做语言门控（本机已装 zh-CN/yue-CN/ja-JP）。
+- Swift API 要点：`SpeechTranscriber(locale:preset: .progressiveTranscription)` + `SpeechAnalyzer.start(inputSequence:)`（AsyncStream<AnalyzerInput>）+ `transcriber.results` 异步序列，`result.isFinal` 区分 Partial/Final，`range: CMTimeRange` 出时间戳。
 
 ## macOS 音频采集
 

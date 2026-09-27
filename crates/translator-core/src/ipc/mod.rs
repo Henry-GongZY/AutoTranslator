@@ -35,6 +35,7 @@ const FEATURES: &[&str] = &[
     "audio.pcm",
     "asr.mock",
     "asr.whisper",
+    "asr.apple-speech",
     "translation.none",
     "translation.mock",
     "translation.apple-translate",
@@ -44,6 +45,7 @@ const FEATURES: &[&str] = &[
 const FEATURES: &[&str] = &[
     "audio.pcm",
     "asr.mock",
+    "asr.apple-speech",
     "translation.none",
     "translation.mock",
     "translation.apple-translate",

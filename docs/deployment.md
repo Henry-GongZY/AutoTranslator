@@ -53,7 +53,7 @@ scripts/build-windows-portable.ps1 -Engine cpu,vulkan   # 自选引擎组合
 | whisper.cpp Metal 推理 | 13+（ggml 运行时加载着色器，随 Metal 能力而定） | — |
 | Translation 框架（apple-translate 后端） | **15.0+** | 隐藏入口 / 状态上报"系统不可用" |
 | Translation 直接初始化（无 SwiftUI、进程内下载） | 26.0+ | 回退 15 的隐藏窗口方案（已实现） |
-| SpeechAnalyzer / SpeechTranscriber | **26.0+** | Whisper Metal 兜底（路线图既定回退） |
+| SpeechAnalyzer / SpeechTranscriber | **26.0+** | Whisper Metal 兜底（路线图既定回退）；已在 macOS 27 实机端到端验证 |
 | Core Audio Process Tap（采集备选） | 14.4+ | SCK |
 | Foundation Models（术语润色等） | 26.0+ | 不提供 |
 | Swift `onChange(of:)` 双参、`MainActor.assumeIsolated` | 14.0 | floor=13 时须回退单参/`dispatchPrecondition` |

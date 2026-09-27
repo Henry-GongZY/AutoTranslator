@@ -120,6 +120,11 @@ def test_bridge(sock_path, source, target):
     if not caps.get("ok"):
         sys.exit("bridge capabilities probe failed")
 
+    asr_caps = rpc("asr-capabilities")
+    print(f"[bridge] asr-capabilities: {json.dumps(asr_caps, ensure_ascii=False)}")
+    if not asr_caps.get("ok"):
+        sys.exit("bridge asr-capabilities probe failed")
+
     sample = "Hello, this is a test sentence for the Apple translation pipeline."
     t0 = time.time()
     result = rpc("translate", text=sample, source=source, target=target)
@@ -127,11 +132,10 @@ def test_bridge(sock_path, source, target):
     print(f"[bridge] translate ({dt:.2f}s): {json.dumps(result, ensure_ascii=False)}")
 
     if caps.get("status") != "installed":
-        # Contract: uninstalled pairs fail fast with actionable guidance
-        # instead of hanging on a download prompt a helper cannot present.
-        assert not result.get("ok"), "uninstalled pairs must fail fast"
-        assert "not installed" in result.get("error", ""), result
-        print("[bridge] fail-fast verified (assets not installed)")
+        # macOS 15 helper: fail fast with guidance. macOS 26+: the direct-init
+        # path surfaces the framework's own error instead.
+        assert not result.get("ok"), "uninstalled pairs must not translate silently"
+        print(f"[bridge] unavailable pair handled: {result.get('error')}")
         sock.close()
         return
 
