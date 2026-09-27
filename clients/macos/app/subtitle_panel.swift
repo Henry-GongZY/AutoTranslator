@@ -109,10 +109,16 @@ private struct OverlayBackdrop: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *), useGlass {
-            content.glassEffect(
-                .regular.tint(Color.black.opacity(0.35)),
-                in: .rect(cornerRadius: 14)
-            )
+            // The glass shape follows the view's layout bounds, which respect
+            // the titlebar safe area by default — leaving the traffic-light
+            // strip bare. Extend under it; the scroll content keeps its own
+            // top padding below the buttons.
+            content
+                .ignoresSafeArea()
+                .glassEffect(
+                    .regular.tint(Color.black.opacity(0.35)),
+                    in: .rect(cornerRadius: 14)
+                )
         } else {
             content.background(Color.black.opacity(0.62))
         }
