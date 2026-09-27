@@ -24,6 +24,14 @@ macOS 签名/公证所需 secrets（不配置则产出未签名 DMG，用户首�
 
 Windows 代码签名未配置：安装器无签名会有 SmartScreen 提示（点"仍要运行"），后续可加 EV 证书签名步骤。
 
+### 已知 CI 问题与修复：arm64 runner 的 ggml i8mm 编译失败
+
+虚拟化 arm64 macOS runner 上，ggml 的 `-mcpu=native` 特性宏与运行时特性测试结果矛盾
+（`vmmlaq_s32 requires target feature 'i8mm'`，见 ggml-cpu-quants.c）。修复方式：
+`vendor/whisper-rs-sys`（crates.io 副本 + build.rs 补丁）支持 `WHISPER_CMAKE_<VAR>` 环境变量
+转发 CMake define，CI 设 `WHISPER_CMAKE_GGML_NATIVE=OFF` 改用固定 armv8.2 基线。
+本地 Apple Silicon 构建不受影响（env 未设置时行为不变）。升级 whisper-rs 版本时需重新 vendor。
+
 ## Windows（已实现）
 
 构建（需要在装了 VS2022 Build Tools + .NET 10 SDK + CUDA/Vulkan SDK 的机器上执行一次）：

@@ -29,6 +29,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
+# Vendored whisper-rs-sys with a small build.rs patch (WHISPER_CMAKE_<VAR> ->
+# CMake define forwarding). See vendor/README.md for the CI runner workaround.
+[patch.crates-io]
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
+
 [profile.release]
 lto = "thin"
 strip = true

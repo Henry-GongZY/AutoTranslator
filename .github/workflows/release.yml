@@ -112,6 +112,10 @@ jobs:
     runs-on: macos-15
     env:
       HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      # Virtualized arm64 runners: -mcpu=native feature macros disagree with
+      # ggml's runtime feature tests (i8mm) and break ggml-cpu-quants.c.
+      # Fixed baseline via the vendored whisper-rs-sys CMake passthrough.
+      WHISPER_CMAKE_GGML_NATIVE: OFF
     steps:
       - uses: actions/checkout@v4
 
