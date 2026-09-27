@@ -135,6 +135,10 @@ impl Session {
                     translation::TranslatorOptions {
                         source_language: asr_cfg.language.clone(),
                         target_language: cfg.target_language.clone(),
+                        api_key: cfg.api_key.clone(),
+                        api_base: cfg.api_base.clone(),
+                        model: cfg.model.clone(),
+                        app_id: cfg.app_id.clone(),
                     },
                 )
                 .await?;

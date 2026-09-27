@@ -10,7 +10,12 @@ public sealed record WhisperModel(string Id, string Description)
     public override string ToString() => $"{Id} · {Description}";
 }
 
-public sealed record RecognitionSettings(string Provider = "whisper", string Engine = "cuda", string Model = "tiny", string Directory = "", string Language = "");
+public sealed record RecognitionSettings(
+    string Provider = "whisper", string Engine = "cuda", string Model = "tiny",
+    string Directory = "", string Language = "",
+    string TranslationProvider = "none", string TranslationTarget = "zh-Hans",
+    string TranslationApiKey = "", string TranslationApiBase = "",
+    string TranslationModel = "", string TranslationAppId = "");
 
 public static class ModelStore
 {

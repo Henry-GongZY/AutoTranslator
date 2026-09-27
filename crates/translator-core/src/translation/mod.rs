@@ -13,6 +13,7 @@
 //! only sees a socket. See `scripts/build-bridge.sh`.
 
 pub mod apple;
+pub mod cloud;
 pub mod mock;
 
 use async_trait::async_trait;
@@ -25,6 +26,15 @@ pub struct TranslatorOptions {
     pub source_language: String,
     /// BCP-47 target language (e.g. `zh-Hans`).
     pub target_language: String,
+    /// Cloud providers: API key (Baidu: the secret key).
+    pub api_key: String,
+    /// Cloud providers: endpoint override, empty = provider default
+    /// (OpenAI-compatible: chat-completions base).
+    pub api_base: String,
+    /// OpenAI-compatible: model name, empty = provider default.
+    pub model: String,
+    /// Baidu: APP ID.
+    pub app_id: String,
 }
 
 #[async_trait]
@@ -43,8 +53,22 @@ pub async fn create(provider: &str, opts: TranslatorOptions) -> Result<Box<dyn T
     match provider {
         "mock" => Ok(Box::new(mock::MockTranslator)),
         "apple-translate" => Ok(Box::new(apple::AppleTranslator::connect(opts).await?)),
+        "openai" | "deepl" | "google" | "baidu" => {
+            let p = cloud::Provider::from_name(provider).ok_or_else(|| {
+                CoreError::Unsupported(format!("unknown cloud provider `{provider}`"))
+            })?;
+            Ok(Box::new(cloud::CloudTranslator::connect(
+                p,
+                opts.source_language,
+                opts.target_language,
+                opts.api_key,
+                opts.api_base,
+                opts.model,
+                opts.app_id,
+            )?))
+        }
         other => Err(CoreError::Unsupported(format!(
-            "translation provider `{other}` is not wired up (known: `mock`, `apple-translate`)"
+            "translation provider `{other}` is not wired up (known: `mock`, `apple-translate`,              `openai`, `deepl`, `google`, `baidu`)"
         ))),
     }
 }
@@ -53,23 +77,28 @@ pub async fn create(provider: &str, opts: TranslatorOptions) -> Result<Box<dyn T
 mod tests {
     use super::*;
 
+    fn test_opts() -> TranslatorOptions {
+        TranslatorOptions {
+            source_language: "en".into(),
+            target_language: "zh-Hans".into(),
+            api_key: String::new(),
+            api_base: String::new(),
+            model: String::new(),
+            app_id: String::new(),
+        }
+    }
+
     #[tokio::test]
     async fn mock_translator_marks_output() {
         let mut t = mock::MockTranslator;
         let out = t.translate("hello world").await.unwrap();
         assert_eq!(out, "[mock-zh] hello world");
+        let _ = test_opts();
     }
 
     #[tokio::test]
     async fn unknown_provider_is_rejected() {
-        let result = create(
-            "bogus",
-            TranslatorOptions {
-                source_language: "en".into(),
-                target_language: "zh-Hans".into(),
-            },
-        )
-        .await;
+        let result = create("bogus", test_opts()).await;
         assert!(matches!(result, Err(CoreError::Unsupported(_))));
     }
 }

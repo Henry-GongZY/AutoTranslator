@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
         // here just mirror and feed future changes back.
         TopmostBox.IsChecked = OverlaySettingsStore.Load().Topmost;
         ClickThroughBox.IsChecked = OverlaySettingsStore.Load().Locked;
+        InitializeTranslationSettings();
         _overlay.SetClickThrough(ClickThroughBox.IsChecked == true);
         _controller.SubtitlesChanged += OnSubtitlesChanged;
         _controller.StatusChanged += OnStatusChanged;
@@ -49,6 +50,12 @@ public sealed partial class MainWindow : Window
 
     private void SetSettingsEnabled(bool enabled)
     {
+        TranslationProviderBox.IsEnabled = enabled;
+        TranslationTargetBox.IsEnabled = enabled;
+        TranslationApiBaseBox.IsEnabled = enabled;
+        TranslationModelBox.IsEnabled = enabled;
+        TranslationAppIdBox.IsEnabled = enabled;
+        TranslationKeyBox.IsEnabled = enabled;
         ProviderBox.IsEnabled = LanguageBox.IsEnabled = enabled;
         MaxLinesBox.IsEnabled = MaxCharsBox.IsEnabled = enabled;
         EngineBox.IsEnabled = ModelBox.IsEnabled = ModelDirectoryBox.IsEnabled = BrowseModelDirectory.IsEnabled = enabled;
@@ -72,7 +79,8 @@ public sealed partial class MainWindow : Window
         {
             var options = new SubtitleOptions(
                 double.IsFinite(MaxLinesBox.Value) ? (int)Math.Round(MaxLinesBox.Value) : 2,
-                double.IsFinite(MaxCharsBox.Value) ? (int)Math.Round(MaxCharsBox.Value) : 42);
+                double.IsFinite(MaxCharsBox.Value) ? (int)Math.Round(MaxCharsBox.Value) : 42,
+                CollectTranslationOptions());
             var provider = TagOf(ProviderBox) ?? "whisper";
             var language = TagOf(LanguageBox) ?? "";
             var model = ModelBox.SelectedItem as WhisperModel ?? ModelStore.Models[0];
@@ -80,7 +88,7 @@ public sealed partial class MainWindow : Window
             var folder = ModelDirectoryBox.Text.Trim();
             if (provider == "whisper" && !ModelStore.IsReady(System.IO.Path.Combine(folder, model.FileName)))
                 throw new InvalidOperationException("模型尚未下载完成，请先准备模型。");
-            await Task.Run(() => _controller.StartAsync(options, provider, language, engine, model.FileName, folder));
+            await Task.Run(() => _controller.StartAsync(options, provider, language, engine, model.FileName, folder, options.Translation));
             if (_closing) { await _controller.StopAsync(); return; }
             StopButton.IsEnabled = PauseButton.IsEnabled = true;
             _paused = false;
@@ -143,6 +151,71 @@ public sealed partial class MainWindow : Window
 
     private void OnClickThroughChanged(object sender, RoutedEventArgs e) =>
         _overlay?.SetClickThrough(ClickThroughBox.IsChecked == true);
+
+    private bool _translationInitialized;
+
+    private void InitializeTranslationSettings()
+    {
+        var settings = ModelStore.Load();
+        SelectTag(TranslationProviderBox, settings.TranslationProvider);
+        SelectTag(TranslationTargetBox, settings.TranslationTarget);
+        TranslationApiBaseBox.Text = settings.TranslationApiBase;
+        TranslationModelBox.Text = settings.TranslationModel;
+        TranslationAppIdBox.Text = settings.TranslationAppId;
+        TranslationKeyBox.Password = settings.TranslationApiKey;
+        UpdateTranslationFieldVisibility();
+        _translationInitialized = true;
+    }
+
+    private TranslationOptions CollectTranslationOptions()
+    {
+        var provider = TagOf(TranslationProviderBox) ?? "none";
+        if (provider == "none") return new TranslationOptions();
+        var target = TagOf(TranslationTargetBox) ?? "zh-Hans";
+        var key = TranslationKeyBox.Password.Trim();
+        if (key.Length == 0)
+            throw new InvalidOperationException($"所选翻译服务（{provider}）需要填写 API Key。");
+        if (provider == "baidu" && TranslationAppIdBox.Text.Trim().Length == 0)
+            throw new InvalidOperationException("百度翻译需要填写 APP ID。");
+        return new TranslationOptions(
+            provider, target, key,
+            TranslationApiBaseBox.Text.Trim(), TranslationModelBox.Text.Trim(),
+            TranslationAppIdBox.Text.Trim());
+    }
+
+    private void SaveTranslationSettings()
+    {
+        if (!_translationInitialized || _closing) return;
+        var s = ModelStore.Load();
+        ModelStore.Save(s with
+        {
+            TranslationProvider = TagOf(TranslationProviderBox) ?? "none",
+            TranslationTarget = TagOf(TranslationTargetBox) ?? "zh-Hans",
+            TranslationApiKey = TranslationKeyBox.Password,
+            TranslationApiBase = TranslationApiBaseBox.Text.Trim(),
+            TranslationModel = TranslationModelBox.Text.Trim(),
+            TranslationAppId = TranslationAppIdBox.Text.Trim(),
+        });
+    }
+
+    private void OnTranslationChanged(object sender, object args)
+    {
+        if (!_translationInitialized) return;
+        UpdateTranslationFieldVisibility();
+        try { SaveTranslationSettings(); }
+        catch (Exception ex) { ModelStatus.Text = $"无法保存翻译设置：{ex.Message}"; }
+    }
+
+    private void UpdateTranslationFieldVisibility()
+    {
+        var provider = TagOf(TranslationProviderBox) ?? "none";
+        var isCloud = provider is "openai" or "deepl" or "google" or "baidu";
+        TranslationTargetBox.Visibility = isCloud ? Visibility.Visible : Visibility.Collapsed;
+        TranslationApiBaseBox.Visibility = provider == "openai" ? Visibility.Visible : Visibility.Collapsed;
+        TranslationModelBox.Visibility = provider == "openai" ? Visibility.Visible : Visibility.Collapsed;
+        TranslationAppIdBox.Visibility = provider == "baidu" ? Visibility.Visible : Visibility.Collapsed;
+        TranslationKeyBox.Visibility = isCloud ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void OnTopmostChanged(object sender, RoutedEventArgs e) =>
         _overlay?.SetTopmost(TopmostBox.IsChecked == true);

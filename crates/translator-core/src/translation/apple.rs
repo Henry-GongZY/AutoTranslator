@@ -209,6 +209,10 @@ mod tests {
         let err = AppleTranslator::connect(TranslatorOptions {
             source_language: "en".into(),
             target_language: "zh-Hans".into(),
+            api_key: String::new(),
+            api_base: String::new(),
+            model: String::new(),
+            app_id: String::new(),
         })
         .await
         .expect_err("connect must fail");

@@ -114,6 +114,28 @@
                         </Grid>
                         <CheckBox x:Name="TopmostBox" Content="字幕固定在最上方窗口" IsChecked="True" Checked="OnTopmostChanged" Unchecked="OnTopmostChanged" />
                         <CheckBox x:Name="ClickThroughBox" Content="锁定悬浮窗（鼠标穿透；取消勾选后可拖动移动、拖边缘调整大小）" IsChecked="True" Checked="OnClickThroughChanged" Unchecked="OnClickThroughChanged" />
+                        <StackPanel x:Name="TranslationSettings" Spacing="8" Margin="0,8,0,0">
+                            <TextBlock Text="翻译" FontSize="14" FontWeight="SemiBold" />
+                            <ComboBox x:Name="TranslationProviderBox" HorizontalAlignment="Stretch" SelectionChanged="OnTranslationChanged">
+                                <ComboBoxItem Tag="none" IsSelected="True">不翻译</ComboBoxItem>
+                                <ComboBoxItem Tag="openai">OpenAI 兼容 API（OpenAI/DeepSeek/GLM/…）</ComboBoxItem>
+                                <ComboBoxItem Tag="deepl">DeepL API</ComboBoxItem>
+                                <ComboBoxItem Tag="google">Google 翻译 API</ComboBoxItem>
+                                <ComboBoxItem Tag="baidu">百度翻译 API</ComboBoxItem>
+                            </ComboBox>
+                            <ComboBox x:Name="TranslationTargetBox" HorizontalAlignment="Stretch" SelectionChanged="OnTranslationChanged">
+                                <ComboBoxItem Tag="zh-Hans" IsSelected="True">简体中文</ComboBoxItem>
+                                <ComboBoxItem Tag="zh-Hant">繁體中文</ComboBoxItem>
+                                <ComboBoxItem Tag="en">English</ComboBoxItem>
+                                <ComboBoxItem Tag="ja">日本語</ComboBoxItem>
+                                <ComboBoxItem Tag="ko">한국어</ComboBoxItem>
+                            </ComboBox>
+                            <TextBox x:Name="TranslationApiBaseBox" PlaceholderText="API 地址（留空 = 官方端点，仅 OpenAI 兼容）" TextChanged="OnTranslationChanged" />
+                            <TextBox x:Name="TranslationModelBox" PlaceholderText="模型名（gpt-4o-mini / deepseek-chat 等，仅 OpenAI 兼容）" TextChanged="OnTranslationChanged" />
+                            <TextBox x:Name="TranslationAppIdBox" PlaceholderText="百度 APP ID（仅百度）" TextChanged="OnTranslationChanged" />
+                            <PasswordBox x:Name="TranslationKeyBox" PlaceholderText="API Key / 密钥" PasswordChanged="OnTranslationChanged" />
+                            <TextBlock Text="凭据保存在本机设置文件；字幕只提交稳定后的完整句。" TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
                         <TextBlock Text="本地识别无需上传音频。选择模型后，缺失文件会自动下载至指定文件夹；演示模式仅显示模拟字幕。" TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Expander>

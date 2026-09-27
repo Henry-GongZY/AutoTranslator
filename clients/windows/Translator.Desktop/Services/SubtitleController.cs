@@ -9,6 +9,19 @@ namespace Translator.Desktop.Services;
 public sealed record SubtitleOptions(int MaxLines = 2, int MaxCharsPerLine = 42);
 
 /// <summary>
+/// Cloud/bridge translation selection; <see cref="SubtitleController"/> maps
+/// it onto the wire's TranslationConfig. ApiKey/ApiBase/Model/AppId are only
+/// meaningful for the cloud providers (openai/deepl/google/baidu).
+/// </summary>
+public sealed record TranslationOptions(
+    string Provider = "none",
+    string Target = "zh-Hans",
+    string ApiKey = "",
+    string ApiBase = "",
+    string Model = "",
+    string AppId = "");
+
+/// <summary>
 /// Glue between the audio capture, the core process and the overlay window.
 /// </summary>
 public sealed class SubtitleController : IAsyncDisposable
@@ -52,6 +65,7 @@ public sealed class SubtitleController : IAsyncDisposable
         string engine = "cuda",
         string model = "ggml-tiny.bin",
         string modelDirectory = "",
+        TranslationOptions? translation = null,
         CancellationToken cancellationToken = default)
     {
         if (_running)
@@ -122,7 +136,17 @@ public sealed class SubtitleController : IAsyncDisposable
                     ModelDirectory = modelDirectory,
                     Language = language,
                 },
-                Translation = new TranslationConfig { Provider = "none" },
+                Translation = translation is null || translation.Provider == "none"
+                    ? new TranslationConfig { Provider = "none" }
+                    : new TranslationConfig
+                    {
+                        Provider = translation.Provider,
+                        TargetLanguage = translation.Target,
+                        ApiKey = translation.ApiKey,
+                        ApiBase = translation.ApiBase,
+                        Model = translation.Model,
+                        AppId = translation.AppId,
+                    },
                 Subtitle = new SubtitleConfig
                 {
                     MaxLines = (uint)Math.Max(1, options.MaxLines),

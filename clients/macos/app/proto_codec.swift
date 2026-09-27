@@ -151,8 +151,13 @@ struct SessionConfig {
     var inputChannels: UInt32
     var sourceLanguage: String // "" = auto detect (blocks translation)
     var targetLanguage: String
-    var translationProvider: String // "none" | "apple-translate"
+    var translationProvider: String // "none" | "apple-translate" | cloud providers
     var model: String // whisper catalog id: tiny/base/small...
+    // Cloud translation credentials (openai/deepl/google/baidu).
+    var translationApiKey: String
+    var translationApiBase: String
+    var translationModel: String
+    var translationAppId: String
 }
 
 // --- envelope ------------------------------------------------------------------
@@ -322,8 +327,12 @@ enum Envelope {
         payload += ProtoWire.uint64(3, 16_000) // core down-mixes/resamples to 16 kHz
         payload += ProtoWire.message(4, asr)
         if cfg.translationProvider != "none" {
-            let translation = ProtoWire.string(1, cfg.translationProvider)
+            var translation = ProtoWire.string(1, cfg.translationProvider)
                 + ProtoWire.string(2, cfg.targetLanguage)
+            if !cfg.translationApiKey.isEmpty { translation += ProtoWire.string(3, cfg.translationApiKey) }
+            if !cfg.translationApiBase.isEmpty { translation += ProtoWire.string(4, cfg.translationApiBase) }
+            if !cfg.translationModel.isEmpty { translation += ProtoWire.string(5, cfg.translationModel) }
+            if !cfg.translationAppId.isEmpty { translation += ProtoWire.string(6, cfg.translationAppId) }
             payload += ProtoWire.message(5, translation)
         } else {
             payload += ProtoWire.message(5, ProtoWire.string(1, "none"))

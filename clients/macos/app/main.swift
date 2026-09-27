@@ -37,7 +37,11 @@ enum SelfTest {
             sourceLanguage: "en",
             targetLanguage: "zh-Hans",
             translationProvider: "apple-translate",
-            model: "tiny"
+            model: "tiny",
+            translationApiKey: "",
+            translationApiBase: "",
+            translationModel: "",
+            translationAppId: ""
         )
         let frame = Envelope.startSession(cfg)
 
@@ -143,7 +147,11 @@ enum SelfTest {
                         sourceLanguage: "en",
                         targetLanguage: "zh-Hans",
                         translationProvider: "mock",
-                        model: "tiny"
+                        model: "tiny",
+                        translationApiKey: "",
+                        translationApiBase: "",
+                        translationModel: "",
+                        translationAppId: ""
                     ))
                 case .sessionStarted(let ok, let error):
                     print("[selftest-event] sessionStarted ok=\(ok) error=\(error)")

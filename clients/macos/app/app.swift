@@ -43,6 +43,26 @@ final class SessionController: ObservableObject {
     @Published var asrProvider = "whisper"
     /// Overlay card material (Liquid Glass needs macOS 26; ignored below).
     @Published var overlayGlass = UserDefaults.standard.object(forKey: "OverlayUseGlass") as? Bool ?? true
+    // Cloud translation credentials — persisted on change.
+    @Published var translationApiKey: String = UserDefaults.standard.string(forKey: "TranslationApiKey") ?? "" {
+        didSet { UserDefaults.standard.set(translationApiKey, forKey: "TranslationApiKey") }
+    }
+    @Published var translationApiBase: String = UserDefaults.standard.string(forKey: "TranslationApiBase") ?? "" {
+        didSet { UserDefaults.standard.set(translationApiBase, forKey: "TranslationApiBase") }
+    }
+    @Published var translationModel: String = UserDefaults.standard.string(forKey: "TranslationModel") ?? "" {
+        didSet { UserDefaults.standard.set(translationModel, forKey: "TranslationModel") }
+    }
+    @Published var translationAppId: String = UserDefaults.standard.string(forKey: "TranslationAppId") ?? "" {
+        didSet { UserDefaults.standard.set(translationAppId, forKey: "TranslationAppId") }
+    }
+
+    var translationUsesCloud: Bool {
+        ["openai", "deepl", "google", "baidu"].contains(translationProvider)
+    }
+    var translationNeedsBase: Bool { translationProvider == "openai" }
+    var translationNeedsModel: Bool { translationProvider == "openai" }
+    var translationNeedsAppId: Bool { translationProvider == "baidu" }
     @Published var assetStatusText = "未检测"
     /// Non-nil while the system asset-download flow should run (drives the
     /// translationTask in the control view).
@@ -98,6 +118,16 @@ final class SessionController: ObservableObject {
             errorMessage = "Apple 系统识别不支持自动检测语言，请选择源语言。"
             return
         }
+        if translationUsesCloud {
+            if translationApiKey.trimmingCharacters(in: .whitespaces).isEmpty {
+                errorMessage = "所选翻译服务需要填写 API Key。"
+                return
+            }
+            if translationProvider == "baidu" && translationAppId.trimmingCharacters(in: .whitespaces).isEmpty {
+                errorMessage = "百度翻译需要填写 APP ID 和密钥。"
+                return
+            }
+        }
         // No CGPreflight gate here: on macOS 15 CGRequestScreenCaptureAccess
         // can silently refuse to prompt. SCStream.startCapture below triggers
         // the reliable system prompt on its own.
@@ -150,7 +180,11 @@ final class SessionController: ObservableObject {
                 sourceLanguage: sourceLanguage,
                 targetLanguage: targetLanguage,
                 translationProvider: translationProvider,
-                model: asrProvider == "whisper" ? model : ""
+                model: asrProvider == "whisper" ? model : "",
+                translationApiKey: translationApiKey,
+                translationApiBase: translationApiBase,
+                translationModel: translationModel,
+                translationAppId: translationAppId
             )
             link?.startSession(cfg)
 
@@ -412,8 +446,26 @@ struct ControlView: View {
                 }
             }
             Picker("翻译", selection: $controller.translationProvider) {
-                Text("Apple 系统翻译（离线）").tag("apple-translate")
+                Text("Apple 系统翻译（离线，15+）").tag("apple-translate")
+                Text("OpenAI 兼容 API").tag("openai")
+                Text("DeepL API").tag("deepl")
+                Text("Google 翻译 API").tag("google")
+                Text("百度翻译 API").tag("baidu")
                 Text("不翻译").tag("none")
+            }
+            if controller.translationUsesCloud {
+                Group {
+                    if controller.translationNeedsBase {
+                        TextField("API 地址（留空 = 官方端点）", text: $controller.translationApiBase)
+                    }
+                    if controller.translationNeedsModel {
+                        TextField("模型名（如 gpt-4o-mini / deepseek-chat）", text: $controller.translationModel)
+                    }
+                    if controller.translationNeedsAppId {
+                        TextField("百度 APP ID", text: $controller.translationAppId)
+                    }
+                    SecureField("API Key", text: $controller.translationApiKey)
+                }
             }
 
             TranslationAssetSection(controller: controller)

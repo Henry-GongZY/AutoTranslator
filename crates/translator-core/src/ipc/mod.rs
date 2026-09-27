@@ -39,6 +39,10 @@ const FEATURES: &[&str] = &[
     "translation.none",
     "translation.mock",
     "translation.apple-translate",
+    "translation.openai",
+    "translation.deepl",
+    "translation.google",
+    "translation.baidu",
 ];
 
 #[cfg(not(feature = "whisper"))]
@@ -49,6 +53,10 @@ const FEATURES: &[&str] = &[
     "translation.none",
     "translation.mock",
     "translation.apple-translate",
+    "translation.openai",
+    "translation.deepl",
+    "translation.google",
+    "translation.baidu",
 ];
 
 /// Audio frames buffered between the reader and the pipeline. Bounded on

@@ -65,10 +65,20 @@ message AsrConfig {
 }
 
 message TranslationConfig {
-  // Providers: none | mock | apple-translate (Swift bridge, macOS).
+  // Providers: none | mock | apple-translate (Swift bridge, macOS)
+  //   | openai (any OpenAI-compatible chat API: OpenAI/DeepSeek/GLM/…)
+  //   | deepl | google | baidu.
   string provider = 1;
   // BCP-47 target language, e.g. zh-Hans. Required for every provider but none.
   string target_language = 2;
+  // Cloud provider credentials/endpoints; required by the cloud providers.
+  string api_key = 3;
+  // OpenAI-compatible: chat-completions base, empty = provider default.
+  string api_base = 4;
+  // OpenAI-compatible: model name, empty = provider default.
+  string model = 5;
+  // Baidu: APP ID (api_key carries the secret).
+  string app_id = 6;
 }
 
 message SubtitleConfig {
