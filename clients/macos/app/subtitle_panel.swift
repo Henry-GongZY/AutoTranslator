@@ -26,6 +26,9 @@ final class SubtitleModel: ObservableObject {
     // the bare swiftc build environment cannot always resolve.
     @Published var scrollPosition = ScrollPosition(edge: .bottom)
     @Published var pinnedToBottom = true
+    /// Card material: Liquid Glass on macOS 26+, plain translucent on 15.
+    /// Only honoured when the OS provides the API (see OverlayBackdrop).
+    @Published var useGlass = UserDefaults.standard.object(forKey: "OverlayUseGlass") as? Bool ?? true
 
     /// History bound: old lines age out of the scrollback.
     private static let maxRows = 300
@@ -82,7 +85,7 @@ struct SubtitleOverlayView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
-        .background(Color.black.opacity(0.62))
+        .modifier(OverlayBackdrop(useGlass: model.useGlass))
         .scrollPosition($model.scrollPosition)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             // At the bottom when the visible bottom edge reaches the content end.
@@ -95,6 +98,23 @@ struct SubtitleOverlayView: View {
             if model.pinnedToBottom {
                 model.scrollPosition.scrollTo(edge: .bottom)
             }
+        }
+    }
+}
+
+/// Card material: Liquid Glass on macOS 26+ (dark-tinted for caption
+/// legibility over video), translucent black below that or on request.
+private struct OverlayBackdrop: ViewModifier {
+    var useGlass: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *), useGlass {
+            content.glassEffect(
+                .regular.tint(Color.black.opacity(0.35)),
+                in: .rect(cornerRadius: 14)
+            )
+        } else {
+            content.background(Color.black.opacity(0.62))
         }
     }
 }

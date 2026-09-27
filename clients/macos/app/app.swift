@@ -40,6 +40,8 @@ final class SessionController: ObservableObject {
     /// ASR engine: whisper everywhere; apple-speech requires macOS 26 and
     /// fails the session with a clear state when unavailable (core-side gate).
     @Published var asrProvider = "whisper"
+    /// Overlay card material (Liquid Glass needs macOS 26; ignored below).
+    @Published var overlayGlass = UserDefaults.standard.object(forKey: "OverlayUseGlass") as? Bool ?? true
     @Published var assetStatusText = "未检测"
     /// Non-nil while the system asset-download flow should run (drives the
     /// translationTask in the control view).
@@ -372,6 +374,12 @@ struct ControlView: View {
                     }
                 }
             }
+            if #available(macOS 26.0, *) {
+                Picker("悬浮窗材质", selection: $controller.overlayGlass) {
+                    Text("Liquid Glass 玻璃").tag(true)
+                    Text("纯色半透明").tag(false)
+                }
+            }
             Picker("翻译", selection: $controller.translationProvider) {
                 Text("Apple 系统翻译（离线）").tag("apple-translate")
                 Text("不翻译").tag("none")
@@ -417,6 +425,10 @@ struct ControlView: View {
         .onChange(of: controller.overlayAlwaysOnTop) { _, topmost in
             controller.panel.setAlwaysOnTop(topmost)
             UserDefaults.standard.set(topmost, forKey: "OverlayAlwaysOnTop")
+        }
+        .onChange(of: controller.overlayGlass) { _, glass in
+            controller.panel.model.useGlass = glass
+            UserDefaults.standard.set(glass, forKey: "OverlayUseGlass")
         }
         .onAppear { controller.refreshAssetStatus() }
         // The system language-asset download prompt attaches here, in a real
