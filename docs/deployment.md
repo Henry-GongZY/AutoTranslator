@@ -7,6 +7,23 @@
 | Windows | `scripts/build-windows-portable.ps1` | ✅ 已实现：产物自带 .NET 运行时 + Windows App SDK + 引擎，目标机零安装 |
 | macOS | 当前产物 target=macOS 15、arm64-only | ⚠️ 只在 Apple Silicon + macOS 15+ 可跑；按下方清单改造为 floor 13 通用二进制 |
 
+## GitHub Actions 自动打包（.github/workflows/release.yml）
+
+- **触发**：推送 `v*` tag → 构建双平台安装包并发布 GitHub Release；`workflow_dispatch` 手动构建仅产出 artifacts
+- **Windows**（windows-latest）：cpu+vulkan 引擎（CUDA 由手动开关加装 toolkit 12.6）→ `dotnet publish --self-contained` → VC CRT 复制 → `packaging/translator.iss`（Inno Setup，用户级安装免管理员）产出 `AutoTranslatorSetup-x64-<版本>.exe` + 便携 zip
+- **macOS**（macos-15, arm64）：metal 引擎 → 桥接 → App bundle →（配置 secrets 后）Developer ID 签名 + notarytool 公证 + staple → `hdiutil` 打包 `AutoTranslator-macos-arm64-<版本>.dmg`（拖入 Applications 式标准分发）
+- **Release**：tag 构建自动附带 SHA256SUMS
+
+macOS 签名/公证所需 secrets（不配置则产出未签名 DMG，用户首次打开需右键→打开）：
+
+| Secret | 内容 |
+| --- | --- |
+| MACOS_CERTIFICATE_P12 | Developer ID Application 证书 .p12 的 base64 |
+| MACOS_CERTIFICATE_PASSWORD | .p12 导出密码 |
+| APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID | notarytool 凭据（Apple ID + App 专用密码 + 团队 ID） |
+
+Windows 代码签名未配置：安装器无签名会有 SmartScreen 提示（点"仍要运行"），后续可加 EV 证书签名步骤。
+
 ## Windows（已实现）
 
 构建（需要在装了 VS2022 Build Tools + .NET 10 SDK + CUDA/Vulkan SDK 的机器上执行一次）：

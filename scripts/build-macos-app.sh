@@ -15,6 +15,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo"
 
 app_dir="$repo/target/AutoTranslatorMac.app"
+app_version="${APP_VERSION:-0.1.0}"
 bin_dir="$app_dir/Contents/MacOS"
 res_dir="$app_dir/Contents/Resources"
 mkdir -p "$bin_dir" "$res_dir"
@@ -34,8 +35,8 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>      <string>com.autotranslator.macos</string>
     <key>CFBundleExecutable</key>      <string>AutoTranslatorMac</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key>         <string>1</string>
+    <key>CFBundleShortVersionString</key><string>${app_version}</string>
+    <key>CFBundleVersion</key>         <string>${app_version}</string>
     <key>LSMinimumSystemVersion</key>  <string>15.0</string>
     <key>NSHighResolutionCapable</key> <true/>
 </dict>
