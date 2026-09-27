@@ -33,7 +33,7 @@ public sealed partial class SubtitleOverlayWindow : Window
 
     private readonly nint _hwnd;
     private readonly AppWindow _appWindow;
-    private readonly OverlaySettings _settings;
+    private OverlaySettings _settings;
     private readonly DispatcherQueueTimer _saveTimer;
 
     private string? _resizeMode;
@@ -206,24 +206,6 @@ public sealed partial class SubtitleOverlayWindow : Window
         if (sender is FrameworkElement element) element.ReleasePointerCapture(e.Pointer);
         OverlaySettingsStore.Save(CurrentSettings());
         e.Handled = true;
-    }
-
-    private void OnGripEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (_resizeMode is not null) return;
-        var shape = (sender as FrameworkElement)?.Tag as string ?? "";
-        ProtectedCursor = InputSystemCursor.Create(shape switch
-        {
-            "Left" or "Right" => InputSystemCursorShape.SizeWestEast,
-            "Top" or "Bottom" => InputSystemCursorShape.SizeNorthSouth,
-            "TopLeft" or "BottomRight" => InputSystemCursorShape.SizeNorthwestSoutheast,
-            _ => InputSystemCursorShape.SizeNortheastSouthwest,
-        });
-    }
-
-    private void OnGripExited(object sender, PointerRoutedEventArgs e)
-    {
-        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     }
 
     private void UpdateWindowRegion()
