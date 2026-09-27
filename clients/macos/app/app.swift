@@ -5,6 +5,7 @@
 // Rust core keeps session/timeline/stabilisation/translation scheduling.
 
 import AppKit
+import ScreenCaptureKit
 import SwiftUI
 import Translation
 
@@ -332,6 +333,36 @@ final class SessionController: ObservableObject {
         return result == 0
     }
 
+    /// Debug: screenshot our own overlay window (the app holds the Screen
+    /// Recording permission, so this works headlessly) for UI debugging.
+    func captureOverlayToTmp() {
+        panel.show()
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let number = self.panel.windowNumber
+                guard let scWindow = content.windows.first(where: { $0.windowID == CGWindowID(number) }) else {
+                    appLog("[capture-overlay] overlay window not found in shareable content")
+                    return
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: scWindow)
+                let config = SCStreamConfiguration()
+                config.width = Int(self.panel.pixelSize.width * 2)
+                config.height = Int(self.panel.pixelSize.height * 2)
+                config.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let rep = NSBitmapImageRep(cgImage: image)
+                guard let data = rep.representation(using: .png, properties: [:]) else { return }
+                try data.write(to: URL(fileURLWithPath: "/tmp/overlay.png"))
+                appLog("[capture-overlay] saved /tmp/overlay.png")
+                exit(0)
+            } catch {
+                appLog("[capture-overlay] failed: \(error)")
+                exit(1)
+            }
+        }
+    }
+
     private func resolveCoreBinary() -> String {
         if let env = ProcessInfo.processInfo.environment["TRANSLATOR_CORE_BIN"], !env.isEmpty {
             return env
@@ -482,6 +513,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         appLog("[app] launched")
+        if CommandLine.arguments.contains("--capture-overlay") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.controller.captureOverlayToTmp()
+            }
+        }
         if CommandLine.arguments.contains("--auto-start") {
             // Retry until the screen-recording permission is granted, so the
             // session starts by itself right after the user allows it.

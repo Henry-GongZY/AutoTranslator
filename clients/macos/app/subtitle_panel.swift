@@ -58,7 +58,10 @@ struct SubtitleOverlayView: View {
     @ObservedObject var model: SubtitleModel
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            backdrop
+                .ignoresSafeArea()
+            ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(model.rows) { row in
                     VStack(alignment: .leading, spacing: 2) {
@@ -85,7 +88,6 @@ struct SubtitleOverlayView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
-        .modifier(OverlayBackdrop(useGlass: model.useGlass))
         .scrollPosition($model.scrollPosition)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             // At the bottom when the visible bottom edge reaches the content end.
@@ -99,28 +101,23 @@ struct SubtitleOverlayView: View {
                 model.scrollPosition.scrollTo(edge: .bottom)
             }
         }
+        }
     }
-}
 
-/// Card material: Liquid Glass on macOS 26+ (dark-tinted for caption
-/// legibility over video), translucent black below that or on request.
-private struct OverlayBackdrop: ViewModifier {
-    var useGlass: Bool
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *), useGlass {
-            // The glass shape follows the view's layout bounds, which respect
-            // the titlebar safe area by default — leaving the traffic-light
-            // strip bare. Extend under it; the scroll content keeps its own
-            // top padding below the buttons.
-            content
-                .ignoresSafeArea()
-                .glassEffect(
-                    .regular.tint(Color.black.opacity(0.35)),
-                    in: .rect(cornerRadius: 14)
-                )
+    /// Full-bleed card material: Liquid Glass on macOS 26+ (dark-tinted for
+    /// caption legibility over video), translucent black below that or on
+    /// request. A dedicated layer + ignoresSafeArea is required — glassEffect
+    /// draws within safe-area bounds otherwise, leaving the titlebar strip
+    /// bare (SFSpeechError-style regression was the traffic-light row).
+    @ViewBuilder
+    private var backdrop: some View {
+        if #available(macOS 26.0, *), model.useGlass {
+            Color.clear.glassEffect(
+                .regular.tint(Color.black.opacity(0.35)),
+                in: .rect(cornerRadius: 14)
+            )
         } else {
-            content.background(Color.black.opacity(0.62))
+            Color.black.opacity(0.62)
         }
     }
 }
@@ -191,6 +188,14 @@ final class SubtitlePanelController {
             y: min(max(frame.minY, visible.minY), visible.maxY - size.height)
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+
+    var windowNumber: Int {
+        panel.windowNumber
+    }
+
+    var pixelSize: CGSize {
+        panel.frame.size
     }
 
     func setAlwaysOnTop(_ topmost: Bool) {
