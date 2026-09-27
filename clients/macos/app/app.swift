@@ -265,13 +265,22 @@ final class SessionController: ObservableObject {
 
     // MARK: helpers
 
-    /// Spawn the Swift bridge when it is not already running: the apple-speech
-    /// and apple-translate providers both talk to it over its socket.
+    /// Spawn the Swift bridge when it is not actually reachable: the apple-speech
+    /// and apple-translate providers both talk to it over its socket. A socket
+    /// FILE alone proves nothing — a killed bridge leaves one behind and the
+    /// core would get ECONNREFUSED — so probe with a real connection.
     private func ensureBridge() throws {
-        if FileManager.default.fileExists(atPath: "/tmp/translator-bridge-v1.sock") {
-            // Assume a live bridge; a stale socket fails fast on connect.
+        let socketPath = "/tmp/translator-bridge-v1.sock"
+        if bridgeSocketAlive(socketPath) {
             return
         }
+        appLog("[bridge] socket not answering, respawning")
+        // A stale socket file blocks the new bind; the bridge also removes
+        // one at bind, but clear it here so the probe below is honest.
+        try? FileManager.default.removeItem(atPath: socketPath)
+        bridgeProcess?.terminate()
+        bridgeProcess = nil
+
         let binary = ProcessInfo.processInfo.environment["TRANSLATOR_BRIDGE_BIN"]
             ?? Bundle.main.path(forResource: "translator-bridge", ofType: nil)
             ?? "target/translator-bridge"
@@ -280,20 +289,44 @@ final class SessionController: ObservableObject {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
+        FileManager.default.createFile(atPath: "/tmp/translator-bridge-mac.log", contents: nil)
         if let stderr = FileHandle(forWritingAtPath: "/tmp/translator-bridge-mac.log") {
             stderr.seekToEndOfFile()
             process.standardError = stderr
-        } else {
-            FileManager.default.createFile(atPath: "/tmp/translator-bridge-mac.log", contents: nil)
-            if let stderr = FileHandle(forWritingAtPath: "/tmp/translator-bridge-mac.log") {
-                process.standardError = stderr
-            }
         }
         try process.run()
         bridgeProcess = process
         appLog("[bridge] spawned \(binary)")
-        // Give the socket a moment; the provider's connect has its own retry.
-        Thread.sleep(forTimeInterval: 0.5)
+
+        // Wait for the socket to actually answer (up to ~5 s).
+        for _ in 0..<50 {
+            if bridgeSocketAlive(socketPath) {
+                appLog("[bridge] alive")
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        throw CoreLinkError.spawnFailed("translator-bridge 已启动但未监听，详见 /tmp/translator-bridge-mac.log")
+    }
+
+    /// True when something is listening on the Unix socket.
+    private func bridgeSocketAlive(_ path: String) -> Bool {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        let bytes = Array(path.utf8)
+        guard bytes.count < 104 else { return false }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { dest in
+            dest.copyBytes(from: bytes)
+        }
+        let result = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                connect(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        return result == 0
     }
 
     private func resolveCoreBinary() -> String {
