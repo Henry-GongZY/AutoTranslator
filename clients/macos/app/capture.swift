@@ -12,6 +12,14 @@ import AVFoundation
 import CoreMedia
 import ScreenCaptureKit
 
+/// One-shot diagnostic logging (format description on first audio buffer).
+private var loggedFormat = false
+func logOnce(_ message: String) {
+    guard !loggedFormat else { return }
+    loggedFormat = true
+    appLog("[capture] \(message)")
+}
+
 final class SystemAudioCapture: NSObject, SCStreamOutput {
     var onChunk: ((_ rate: UInt32, _ channels: UInt32, _ frames: UInt32, _ timestampUs: UInt64, _ pcm: [UInt8]) -> Void)?
     private(set) var droppedChunks = 0
@@ -59,7 +67,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput {
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: outputQueue)
-        try await stream.startCapture()
+        do {
+            try await stream.startCapture()
+        } catch {
+            appLog("[capture] startCapture FAILED: \(error)")
+            throw error
+        }
+        appLog("[capture] started (audio=\(config.capturesAudio), \(config.sampleRate) Hz x \(config.channelCount))")
         self.stream = stream
     }
 
@@ -77,80 +91,127 @@ final class SystemAudioCapture: NSObject, SCStreamOutput {
 
     // SCStreamOutput
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        callbackCount += 1
+        if callbackCount % 100 == 1 {
+            appLog("[capture] callback #\(callbackCount) type=\(type == .audio ? "audio" : "other")")
+        }
         guard type == .audio else { return }
         ingest(sampleBuffer)
     }
+    private var callbackCount = 0
 
     private func ingest(_ sampleBuffer: CMSampleBuffer) {
-        guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        guard CMSampleBufferDataIsReady(sampleBuffer) else { return drop("data not ready") }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
-            return
+            return drop("no format description")
         }
 
-        var bufferList = AudioBufferList()
-        var blockBuffer: CMBlockBuffer?
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        // The list must be sized for every channel: AudioBufferList carries one
+        // inline AudioBuffer, stereo non-interleaved needs one more behind it.
+        var needed = 0
+        var sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer,
-            bufferListSizeNeededOut: nil,
-            bufferListOut: &bufferList,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
+            bufferListSizeNeededOut: &needed,
+            bufferListOut: nil,
+            bufferListSize: 0,
             blockBufferAllocator: kCFAllocatorDefault,
             blockBufferMemoryAllocator: kCFAllocatorDefault,
-            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
-            blockBufferOut: &blockBuffer
+            flags: 0,
+            blockBufferOut: nil
         )
-        guard status == noErr, blockBuffer != nil else { return }
+        guard sizeStatus == noErr, needed > 0 else { return drop("size probe \(sizeStatus)") }
+        if scratch.count < needed { scratch = [UInt8](repeating: 0, count: needed) }
 
-        let buffers = UnsafeMutableAudioBufferListPointer(&bufferList)
-        guard let first = buffers.first, first.mDataByteSize > 0 else { return }
-        // Non-interleaved: one AudioBuffer per channel, frame count from bytes.
-        let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size
-        guard frames > 0 else { return }
-        let ch = max(1, buffers.count)
+        var blockBuffer: CMBlockBuffer?
+        var extractStatus: OSStatus = -1
+        scratch.withUnsafeMutableBytes { raw in
+            let list = raw.baseAddress!.assumingMemoryBound(to: AudioBufferList.self)
+            extractStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+                sampleBuffer,
+                bufferListSizeNeededOut: nil,
+                bufferListOut: list,
+                bufferListSize: needed,
+                blockBufferAllocator: kCFAllocatorDefault,
+                blockBufferMemoryAllocator: kCFAllocatorDefault,
+                flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+                blockBufferOut: &blockBuffer
+            )
+            guard extractStatus == noErr, blockBuffer != nil else { return }
 
-        lock.lock()
-        if accumFrames + frames > maxAccumFrames {
-            droppedChunks += 1
-            lock.unlock()
-            return
-        }
-        accum.reserveCapacity((accumFrames + frames) * ch)
-        for f in 0..<frames {
-            for c in 0..<ch {
-                let audioBuffer = buffers[c]
-                let data = audioBuffer.mData?.assumingMemoryBound(to: Float.self)
-                accum.append(data?[f] ?? 0)
+            let buffers = UnsafeMutableAudioBufferListPointer(list)
+            guard let first = buffers.first, first.mDataByteSize > 0 else { return }
+            let channelsPerBuffer = Int(first.mNumberChannels)
+            // Interleaved = one buffer carrying all channels; non-interleaved =
+            // one AudioBuffer per channel. SCK has delivered both layouts.
+            let interleaved = buffers.count == 1 && channelsPerBuffer > 1
+            let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / (interleaved ? channelsPerBuffer : 1)
+            guard frames > 0 else { return }
+            let ch = max(1, channelsPerBuffer * buffers.count)
+            logOnce("audio format: \(asbd.mSampleRate) Hz x \(ch) ch, buffers=\(buffers.count) ch/buf=\(channelsPerBuffer) interleave=\(interleaved)")
+
+            lock.lock()
+            defer { lock.unlock() }
+            if accumFrames + frames > maxAccumFrames {
+                droppedChunks += 1
+                return
+            }
+            accum.reserveCapacity((accumFrames + frames) * ch)
+            if interleaved {
+                let data = first.mData!.assumingMemoryBound(to: Float.self)
+                for f in 0..<frames {
+                    for c in 0..<ch {
+                        accum.append(data[f * ch + c])
+                    }
+                }
+            } else {
+                for f in 0..<frames {
+                    for c in 0..<ch {
+                        let audioBuffer = buffers[c]
+                        let data = audioBuffer.mData?.assumingMemoryBound(to: Float.self)
+                        accum.append(data?[f] ?? 0)
+                    }
+                }
+            }
+            accumFrames += frames
+
+            let stride = chunkFrames * ch
+            while accumFrames >= chunkFrames {
+                let slice = Array(accum.prefix(stride))
+                accum.removeFirst(stride)
+                accumFrames -= chunkFrames
+                var bytes: [UInt8] = []
+                bytes.reserveCapacity(slice.count * 4)
+                for value in slice {
+                    withUnsafeBytes(of: value.bitPattern.littleEndian) { bytes.append(contentsOf: $0) }
+                }
+                sampleRate = asbd.mSampleRate
+                channels = ch
+                let rate = UInt32(asbd.mSampleRate)
+                let channelCount = UInt32(ch)
+                timestampUs &+= UInt64(Double(chunkFrames) * 1_000_000 / max(1, asbd.mSampleRate))
+                let ts = timestampUs
+                // onChunk hands the chunk to the core link's write queue; safe
+                // to call while holding our lock (it never blocks on us).
+                onChunk?(rate, channelCount, UInt32(chunkFrames), ts, bytes)
             }
         }
-        accumFrames += frames
-
-        var chunks: [[UInt8]] = []
-        let stride = chunkFrames * ch
-        while accumFrames >= chunkFrames {
-            let slice = Array(accum.prefix(stride))
-            accum.removeFirst(stride)
-            accumFrames -= chunkFrames
-            var bytes: [UInt8] = []
-            bytes.reserveCapacity(slice.count * 4)
-            for value in slice {
-                withUnsafeBytes(of: value.bitPattern.littleEndian) { bytes.append(contentsOf: $0) }
-            }
-            chunks.append(bytes)
-        }
-        sampleRate = asbd.mSampleRate
-        channels = ch
-        lock.unlock()
-
-        guard !chunks.isEmpty else { return }
-        let rate = UInt32(asbd.mSampleRate)
-        let channelCount = UInt32(ch)
-        let usPerChunk = UInt64(Double(chunkFrames) * 1_000_000 / max(1, asbd.mSampleRate))
-        for chunk in chunks {
-            timestampUs &+= usPerChunk
-            onChunk?(rate, channelCount, UInt32(chunkFrames), timestampUs, chunk)
+        if extractStatus != noErr {
+            drop("extract \(extractStatus)")
         }
     }
+
+    /// Reason-coded drop counter so extraction failures are visible in the log
+    /// without flooding it.
+    private func drop(_ reason: String) {
+        dropReasons[reason, default: 0] += 1
+        if dropReasons[reason]! <= 3 {
+            appLog("[capture] ingest drop: \(reason) (x\(dropReasons[reason]!))")
+        }
+    }
+    private var dropReasons: [String: Int] = [:]
+    /// Scratch storage for the AudioBufferList extraction.
+    private var scratch: [UInt8] = []
 
     enum CaptureError: Error, LocalizedError {
         case noDisplay

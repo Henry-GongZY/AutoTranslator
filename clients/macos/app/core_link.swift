@@ -54,6 +54,10 @@ final class CoreLink {
         process.executableURL = URL(fileURLWithPath: binary)
         let logLevel = ProcessInfo.processInfo.environment["CORE_LOG"] ?? "info"
         process.arguments = ["--socket", socketPath, "--log-level", logLevel]
+        if let stderr = FileHandle(forWritingAtPath: "/tmp/translator-core-mac.log") {
+            stderr.seekToEndOfFile()
+            process.standardError = stderr
+        }
         try process.run()
         self.process = process
 
@@ -226,6 +230,21 @@ final class CoreLink {
 }
 
 // --- POSIX helpers ---
+
+extension CoreLink.LinkEvent: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .connected(let f): return "connected(features=\(f))"
+        case .sessionStarted(let ok, let e): return "sessionStarted(ok=\(ok) error=\(e))"
+        case .sessionStopped(let ok, let e): return "sessionStopped(ok=\(ok) error=\(e))"
+        case .subtitle(let s): return "subtitle(kind=\(s.kind) text=\(s.text) tr=\(s.translated))"
+        case .status(let c, let d): return "status(\(c), \(d))"
+        case .error(let c, let m): return "error(\(c), \(m))"
+        case .metrics(let m): return "metrics(\(m.audioMs)ms dropped=\(m.droppedFrames))"
+        case .disconnected: return "disconnected"
+        }
+    }
+}
 
 private func readAll(fd: Int32, count: Int) -> [UInt8]? {
     guard fd >= 0, count > 0 else { return nil }

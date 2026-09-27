@@ -40,6 +40,15 @@ TRANSLATOR_CORE_BIN=engines/metal/translator-core ./target/core-selftest
 - `subtitle_panel.swift` — 非激活 NSPanel 悬浮窗（.floating、joinAllSpaces）。
 - `app.swift` — 会话编排 + 控制窗口 + 翻译资产下载交互（真实 App 窗口内的 translationTask，下载确认框可正常弹出）。
 
+## 调试备忘（2026-09-27 实战踩坑）
+
+- **AudioBufferList 尺寸**：立体声非交错需要 `AudioBufferList + 1 个 AudioBuffer` 的空间，只按 `MemoryLayout<AudioBufferList>.size` 分配会让样本提取静默全灭（回调在飞、样本为零）——正确做法是先用 `bufferListSizeNeededOut` 探测所需大小。
+- **SCK 两种布局**：非交错（多 AudioBuffer）/ 交错（单 AudioBuffer 多通道）都要兼容，帧数从 `mDataByteSize / 4` 换算。
+- **TCC 与签名**：ad-hoc 签名的 App 每次重编译授权就失效；构建脚本用用户的 Apple Development 证书签名（`codesign --force --deep`），授权跨编译保持。TCC 记录重置：`tccutil reset ScreenCapture com.autotranslator.macos`。
+- **CGRequestScreenCaptureAccess 在 macOS 15 可能不弹窗**；权限状态用 SCStream.startCapture 的系统弹窗兜底最可靠。
+- **诊断日志**：App 事件 → `/tmp/autotranslator-mac.log`；core stderr → `/tmp/translator-core-mac.log`（注意 FileHandle 不创建文件，需先 createFile）。
+- 测试配置覆盖：环境变量 `AUTOTRANSLATOR_PROVIDER/SOURCE/TARGET/MODEL`（`launchctl setenv` 可穿透 `open` 启动）。
+
 ## 已知边界
 
 - 悬浮窗自动位置固定在主屏右下角，未做拖拽记忆。

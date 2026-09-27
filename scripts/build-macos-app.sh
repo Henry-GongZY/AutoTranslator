@@ -60,5 +60,13 @@ swiftc -O -swift-version 5 \
 
 cp "$repo/engines/metal/translator-core" "$res_dir/translator-core"
 
+# Sign with a real identity so the Screen Recording TCC grant survives
+# rebuilds (ad-hoc signatures change on every build and invalidate it).
+identity="$(security find-identity -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')"
+if [[ -n "${identity:-}" ]]; then
+  codesign --force --deep --sign "$identity" "$app_dir" 2>/dev/null \
+    && echo ">> signed: $identity"
+fi
+
 echo "app bundle: $app_dir"
 echo "self-test:  $repo/target/core-selftest  (run it before launching the GUI)"

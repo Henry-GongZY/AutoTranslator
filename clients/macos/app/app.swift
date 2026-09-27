@@ -8,6 +8,20 @@ import AppKit
 import SwiftUI
 import Translation
 
+/// Diagnostics: everything the client does lands in this file — events,
+/// capture format, core lifecycle. Core stderr goes to
+/// /tmp/translator-core-mac.log (see CoreLink.launch).
+func appLog(_ message: String) {
+    let text = "[\(Date().timeIntervalSince1970)] \(message)\n"
+    if let handle = FileHandle(forWritingAtPath: "/tmp/autotranslator-mac.log") {
+        defer { try? handle.close() }
+        handle.seekToEndOfFile()
+        handle.write(Data(text.utf8))
+    } else {
+        try? text.write(toFile: "/tmp/autotranslator-mac.log", atomically: true, encoding: .utf8)
+    }
+}
+
 // --- session orchestration ----------------------------------------------------
 
 @MainActor
@@ -32,6 +46,16 @@ final class SessionController: ObservableObject {
     private var heartbeatTimer: Timer?
     private var audioUs: UInt64 = 0
 
+    init() {
+        // Test/deployment overrides: AUTOTRANSLATOR_PROVIDER/SOURCE/TARGET/MODEL
+        let env = ProcessInfo.processInfo.environment
+        if let v = env["AUTOTRANSLATOR_PROVIDER"], !v.isEmpty { translationProvider = v }
+        if let v = env["AUTOTRANSLATOR_SOURCE"], !v.isEmpty { sourceLanguage = v }
+        if let v = env["AUTOTRANSLATOR_TARGET"], !v.isEmpty { targetLanguage = v }
+        if let v = env["AUTOTRANSLATOR_MODEL"], !v.isEmpty { model = v }
+        appLog("[app] config: provider=\(translationProvider) source=\(sourceLanguage) target=\(targetLanguage) model=\(model)")
+    }
+
     let sourceLanguages: [(id: String, label: String)] = [
         ("en", "英语 English"), ("zh", "中文 Chinese"), ("ja", "日语 日本語"), ("ko", "韩语 한국어"),
     ]
@@ -47,16 +71,16 @@ final class SessionController: ObservableObject {
     func start() {
         errorMessage = ""
         guard !running else { return }
+        appLog("[ui] start pressed (source=\(sourceLanguage) target=\(targetLanguage) provider=\(translationProvider) model=\(model))")
 
         if translationProvider != "none" && sourceLanguage.isEmpty {
             errorMessage = "翻译需要明确的源语言；选“自动检测”时请先把翻译关掉。"
             return
         }
-        guard SystemAudioCapture.hasPermission() else {
-            _ = SystemAudioCapture.requestPermission()
-            errorMessage = "采集系统音频需要屏幕录制权限：请在 系统设置 › 隐私与安全性 › 屏幕录制 中允许本应用，然后重试。"
-            return
-        }
+        // No CGPreflight gate here: on macOS 15 CGRequestScreenCaptureAccess
+        // can silently refuse to prompt. SCStream.startCapture below triggers
+        // the reliable system prompt on its own.
+        appLog("[ui] permission preflight=\(SystemAudioCapture.hasPermission())")
 
         let link = CoreLink()
         let socketPath = "/tmp/translator-core-mac-\(Int.random(in: 1000...9999)).sock"
@@ -65,6 +89,7 @@ final class SessionController: ObservableObject {
                 Task { @MainActor in self?.handle(event) }
             }
         } catch {
+            appLog("[ui] core launch failed: \(error)")
             errorMessage = error.localizedDescription
             return
         }
@@ -90,6 +115,7 @@ final class SessionController: ObservableObject {
     // MARK: events from the core link
 
     private func handle(_ event: CoreLink.LinkEvent) {
+        appLog("[link] \(event)")
         switch event {
         case .connected(let features):
             statusText = "已连接 core（\(features.contains("asr.whisper.engine.metal") ? "Metal 引擎" : "CPU 引擎")），正在启动会话…"
@@ -127,6 +153,7 @@ final class SessionController: ObservableObject {
             running = false
             statusText = ok ? "已停止" : "已停止（\(error)）"
             stopHeartbeat()
+            teardownLink() // kill the core: every 开始 gets a fresh engine
             if !error.isEmpty && !ok { errorMessage = error }
 
         case .subtitle(let info):
@@ -343,6 +370,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.shutdown()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        appLog("[app] launched")
+        if CommandLine.arguments.contains("--auto-start") {
+            // Retry until the screen-recording permission is granted, so the
+            // session starts by itself right after the user allows it.
+            var retries = 0
+            Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
+                retries += 1
+                guard retries < 24 else { timer.invalidate(); return }
+                Task { @MainActor in
+                    guard let self, !self.controller.running else { timer.invalidate(); return }
+                    self.controller.start()
+                }
+            }
+        }
     }
 }
 
