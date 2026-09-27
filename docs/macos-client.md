@@ -49,6 +49,10 @@ TRANSLATOR_CORE_BIN=engines/metal/translator-core ./target/core-selftest
 - **诊断日志**：App 事件 → `/tmp/autotranslator-mac.log`；core stderr → `/tmp/translator-core-mac.log`（注意 FileHandle 不创建文件，需先 createFile）。
 - 测试配置覆盖：环境变量 `AUTOTRANSLATOR_PROVIDER/SOURCE/TARGET/MODEL`（`launchctl setenv` 可穿透 `open` 启动）。
 
+## 部署与兼容性
+
+跨系统版本兼容、一次构建到处运行、新系统高效替换方案：见 [deployment.md](deployment.md)。
+
 ## 已知边界
 
 - 悬浮窗自动位置固定在主屏右下角，未做拖拽记忆。
