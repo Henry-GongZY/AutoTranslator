@@ -39,9 +39,19 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key>         <string>${app_version}</string>
     <key>LSMinimumSystemVersion</key>  <string>15.0</string>
     <key>NSHighResolutionCapable</key> <true/>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+    </array>
 </dict>
 </plist>
 PLIST
+
+mkdir -p "$res_dir/en.lproj" "$res_dir/zh-Hans.lproj"
+printf '/* control-window strings (menus are system-provided) */\n' > "$res_dir/en.lproj/Localizable.strings"
+printf '/* 控制窗口字符串（系统菜单由系统本地化） */\n' > "$res_dir/zh-Hans.lproj/Localizable.strings"
 
 echo ">> building app bundle"
 swiftc -O -swift-version 5 \
