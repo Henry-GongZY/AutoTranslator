@@ -6,7 +6,10 @@ using Translator.Protocol;
 
 namespace Translator.Desktop.Services;
 
-public sealed record SubtitleOptions(int MaxLines = 2, int MaxCharsPerLine = 42);
+public sealed record SubtitleOptions(
+    int MaxLines = 2,
+    int MaxCharsPerLine = 42,
+    TranslationOptions? Translation = null);
 
 /// <summary>
 /// Cloud/bridge translation selection; <see cref="SubtitleController"/> maps
