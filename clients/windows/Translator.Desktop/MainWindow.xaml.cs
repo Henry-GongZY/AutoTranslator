@@ -90,7 +90,7 @@ public sealed partial class MainWindow : Window
                 throw new InvalidOperationException("模型尚未下载完成，请先准备模型。");
             await Task.Run(() => _controller.StartAsync(options, provider, language, engine, model.FileName, folder, options.Translation));
             if (_closing) { await _controller.StopAsync(); return; }
-            StopButton.IsEnabled = PauseButton.IsEnabled = true;
+            StopButton.IsEnabled = PauseButton.IsEnabled = ClearCaptionsButton.IsEnabled = true;
             _paused = false;
             PauseButton.Content = "暂停";
         }
@@ -151,6 +151,11 @@ public sealed partial class MainWindow : Window
 
     private void OnClickThroughChanged(object sender, RoutedEventArgs e) =>
         _overlay?.SetClickThrough(ClickThroughBox.IsChecked == true);
+
+    private void OnClearCaptionsClicked(object sender, RoutedEventArgs e)
+    {
+        _overlay.SetLines(Array.Empty<string>(), false);
+    }
 
     private bool _translationInitialized;
 

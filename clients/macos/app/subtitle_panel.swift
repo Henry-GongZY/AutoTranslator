@@ -78,7 +78,8 @@ struct SubtitleOverlayView: View {
                     }
                 }
                 if model.rows.isEmpty {
-                    Text("等待语音…（滚轮回看历史，拖动窗口调整位置）")
+                    Text(L("等待语音…（滚轮回看历史，拖动窗口调整位置）",
+                           "Waiting for speech… (scroll back through history, drag to move)"))
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.4))
                 }
@@ -145,7 +146,7 @@ final class SubtitlePanelController {
             backing: .buffered,
             defer: false
         )
-        panel.title = "AutoTranslator 字幕"
+        panel.title = L("AutoTranslator 字幕", "AutoTranslator Captions")
         // Transparent hidden titlebar: native chrome (drag zone, resize edges,
         // traffic lights) without a visible bar; content paints beneath it.
         panel.titlebarAppearsTransparent = true

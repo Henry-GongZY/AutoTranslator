@@ -23,12 +23,21 @@ func appLog(_ message: String) {
     }
 }
 
+/// UI language follows the system's preferred language: Chinese for zh-*,
+/// English otherwise.
+private let prefersChinese = Locale.preferredLanguages.first?.hasPrefix("zh") ?? true
+
+/// Bilingual string lookup for the control UI.
+func L(_ zh: String, _ en: String) -> String {
+    prefersChinese ? zh : en
+}
+
 // --- session orchestration ----------------------------------------------------
 
 @MainActor
 final class SessionController: ObservableObject {
     @Published var running = false
-    @Published var statusText = "未启动"
+    @Published var statusText = L("未启动", "Not started")
     @Published var errorMessage = ""
     @Published var metricsText = ""
     @Published var sourceLanguage = "en"
@@ -63,7 +72,7 @@ final class SessionController: ObservableObject {
     var translationNeedsBase: Bool { translationProvider == "openai" }
     var translationNeedsModel: Bool { translationProvider == "openai" }
     var translationNeedsAppId: Bool { translationProvider == "baidu" }
-    @Published var assetStatusText = "未检测"
+    @Published var assetStatusText = L("未检测", "Not checked")
     /// Non-nil while the system asset-download flow should run (drives the
     /// translationTask in the control view).
     @Published var installConfig: TranslationSession.Configuration?
@@ -93,7 +102,9 @@ final class SessionController: ObservableObject {
         ("zh-Hans", "简体中文"), ("zh-Hant", "繁體中文"), ("en", "English"), ("ja", "日本語"), ("ko", "한국어"),
     ]
     let models: [(id: String, label: String)] = [
-        ("tiny", "tiny（最快）"), ("base", "base（均衡）"), ("small", "small（更准）"),
+        ("tiny", L("tiny（最快）", "tiny (fastest)")),
+        ("base", L("base（均衡）", "base (balanced)")),
+        ("small", L("small（更准）", "small (more accurate)")),
     ]
 
     // MARK: session lifecycle
@@ -145,8 +156,13 @@ final class SessionController: ObservableObject {
             return
         }
         self.link = link
-        statusText = "正在连接 core…"
+        statusText = L("正在连接 core…", "Connecting to core…")
         link.handshake()
+    }
+
+    /// Wipe the caption overlay's visible history (new captions keep flowing).
+    func clearCaptions() {
+        panel.clear()
     }
 
     func stop() {
@@ -171,7 +187,7 @@ final class SessionController: ObservableObject {
         appLog("[link] \(event)")
         switch event {
         case .connected(let features):
-            statusText = "已连接 core（\(features.contains("asr.whisper.engine.metal") ? "Metal 引擎" : "CPU 引擎")），正在启动会话…"
+            statusText = L("已连接 core（Metal 引擎），正在启动会话…", "Core connected (Metal engine), starting session…")
             let cfg = SessionConfig(
                 sessionId: "mac-\(UUID().uuidString.prefix(8))",
                 asrProvider: asrProvider,
@@ -192,15 +208,16 @@ final class SessionController: ObservableObject {
             guard ok else {
                 var message = error
                 if message.contains("not installed") {
-                    message += "\n点击下方「安装翻译语言资产」完成一次性下载后重试。"
+                    message += "\n" + L("点击下方「安装翻译语言资产」完成一次性下载后重试。",
+                        "Click \"Install translation language assets\" below, complete the one-time download and start again.")
                 }
                 errorMessage = message
-                statusText = "会话被拒绝"
+                statusText = L("会话被拒绝", "Session rejected")
                 teardownLink()
                 return
             }
             running = true
-            statusText = "监听中"
+            statusText = L("监听中", "Listening")
             panel.clear()
             if showSubtitlePanel { panel.show() }
             startCapture()
@@ -208,7 +225,7 @@ final class SessionController: ObservableObject {
 
         case .sessionStopped(let ok, let error):
             running = false
-            statusText = ok ? "已停止" : "已停止（\(error)）"
+            statusText = ok ? L("已停止", "Stopped") : L("已停止（\(error)）", "Stopped (\(error))")
             stopHeartbeat()
             teardownLink() // kill the core: every 开始 gets a fresh engine
             if !error.isEmpty && !ok { errorMessage = error }
@@ -224,14 +241,15 @@ final class SessionController: ObservableObject {
             errorMessage = message
 
         case .metrics(let m):
-            metricsText = "音频 \(m.audioMs)ms · 丢帧 \(m.droppedFrames) · 字幕 \(m.subtitleEvents) 条"
+            metricsText = L("音频 \(m.audioMs)ms · 丢帧 \(m.droppedFrames) · 字幕 \(m.subtitleEvents) 条",
+                            "audio \(m.audioMs)ms · dropped \(m.droppedFrames) · captions \(m.subtitleEvents)")
 
         case .disconnected:
             if running {
                 running = false
-                statusText = "与 core 断开"
+                statusText = L("与 core 断开", "Disconnected from core")
                 stopHeartbeat()
-                errorMessage = "translator-core 进程断开，请重新开始。"
+                errorMessage = L("translator-core 进程断开，请重新开始。", "translator-core disconnected — start again.")
             }
         }
     }
@@ -247,7 +265,8 @@ final class SessionController: ObservableObject {
             do {
                 try await capture.start()
             } catch {
-                errorMessage = "音频采集失败：\((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                errorMessage = L("音频采集失败：", "Audio capture failed: ")
+                    + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
                 stop()
             }
         }
@@ -294,10 +313,10 @@ final class SessionController: ObservableObject {
 
     private func describe(_ status: LanguageAvailability.Status) -> String {
         switch status {
-        case .installed: return "已安装，可离线翻译"
-        case .supported: return "支持但资产未安装（需一次性下载）"
-        case .unsupported: return "此系统不支持该语言对"
-        @unknown default: return "未知状态"
+        case .installed: return L("已安装，可离线翻译", "Installed — offline translation ready")
+        case .supported: return L("支持但资产未安装（需一次性下载）", "Supported — assets not installed (one-time download)")
+        case .unsupported: return L("此系统不支持该语言对", "Pair unsupported on this system")
+        @unknown default: return L("未知状态", "Unknown")
         }
     }
 
@@ -418,51 +437,51 @@ struct ControlView: View {
             Text("AutoTranslator · 实时系统音频字幕")
                 .font(.headline)
 
-            Picker("源语言", selection: $controller.sourceLanguage) {
+            Picker(L("源语言", "Source"), selection: $controller.sourceLanguage) {
                 ForEach(controller.sourceLanguages, id: \.id) { item in
                     Text(item.label).tag(item.id)
                 }
             }
-            Picker("目标语言", selection: $controller.targetLanguage) {
+            Picker(L("目标语言", "Target"), selection: $controller.targetLanguage) {
                 ForEach(controller.targetLanguages, id: \.id) { item in
                     Text(item.label).tag(item.id)
                 }
             }
-            Picker("识别引擎", selection: $controller.asrProvider) {
-                Text("Whisper（本地 Metal 推理）").tag("whisper")
-                Text("Apple 系统识别（需 macOS 26）").tag("apple-speech")
+            Picker(L("识别引擎", "Recognition engine"), selection: $controller.asrProvider) {
+                Text(L("Whisper（本地 Metal 推理）", "Whisper (local Metal inference)")).tag("whisper")
+                Text(L("Apple 系统识别（需 macOS 26）", "Apple Speech (macOS 26+)")).tag("apple-speech")
             }
             if controller.asrProvider == "whisper" {
-                Picker("识别模型", selection: $controller.model) {
+                Picker(L("识别模型", "Model"), selection: $controller.model) {
                     ForEach(controller.models, id: \.id) { item in
                         Text(item.label).tag(item.id)
                     }
                 }
             }
             if #available(macOS 26.0, *) {
-                Picker("悬浮窗材质", selection: $controller.overlayGlass) {
-                    Text("Liquid Glass 玻璃").tag(true)
-                    Text("纯色半透明").tag(false)
+                Picker(L("悬浮窗材质", "Overlay material"), selection: $controller.overlayGlass) {
+                    Text("Liquid Glass").tag(true)
+                    Text(L("纯色半透明", "Translucent black")).tag(false)
                 }
             }
-            Picker("翻译", selection: $controller.translationProvider) {
-                Text("Apple 系统翻译（离线，15+）").tag("apple-translate")
-                Text("OpenAI 兼容 API").tag("openai")
+            Picker(L("翻译", "Translation"), selection: $controller.translationProvider) {
+                Text(L("Apple 系统翻译（离线，15+）", "Apple Translation (on-device, 15+)")).tag("apple-translate")
+                Text(L("OpenAI 兼容 API", "OpenAI-compatible API")).tag("openai")
                 Text("DeepL API").tag("deepl")
-                Text("Google 翻译 API").tag("google")
-                Text("百度翻译 API").tag("baidu")
-                Text("不翻译").tag("none")
+                Text(L("Google 翻译 API", "Google Translate API")).tag("google")
+                Text(L("百度翻译 API", "Baidu Translate API")).tag("baidu")
+                Text(L("不翻译", "No translation")).tag("none")
             }
             if controller.translationUsesCloud {
                 Group {
                     if controller.translationNeedsBase {
-                        TextField("API 地址（留空 = 官方端点）", text: $controller.translationApiBase)
+                        TextField(L("API 地址（留空 = 官方端点）", "API base URL (blank = official)"), text: $controller.translationApiBase)
                     }
                     if controller.translationNeedsModel {
-                        TextField("模型名（如 gpt-4o-mini / deepseek-chat）", text: $controller.translationModel)
+                        TextField(L("模型名（如 gpt-4o-mini / deepseek-chat）", "Model (e.g. gpt-4o-mini / deepseek-chat)"), text: $controller.translationModel)
                     }
                     if controller.translationNeedsAppId {
-                        TextField("百度 APP ID", text: $controller.translationAppId)
+                        TextField(L("百度 APP ID", "Baidu APP ID"), text: $controller.translationAppId)
                     }
                     SecureField("API Key", text: $controller.translationApiKey)
                 }
@@ -472,15 +491,16 @@ struct ControlView: View {
 
             HStack(spacing: 12) {
                 if controller.running {
-                    Button("停止") { controller.stop() }
+                    Button(L("停止", "Stop")) { controller.stop() }
                         .keyboardShortcut(.cancelAction)
                 } else {
-                    Button("开始") { controller.start() }
+                    Button(L("开始", "Start")) { controller.start() }
                         .keyboardShortcut(.defaultAction)
                 }
-                Toggle("字幕悬浮窗", isOn: $controller.showSubtitlePanel)
+                Button(L("清空字幕", "Clear captions")) { controller.clearCaptions() }
+                Toggle(L("字幕悬浮窗", "Subtitle overlay"), isOn: $controller.showSubtitlePanel)
                     .toggleStyle(.checkbox)
-                Toggle("置顶", isOn: $controller.overlayAlwaysOnTop)
+                Toggle(L("置顶", "Keep on top"), isOn: $controller.overlayAlwaysOnTop)
                     .toggleStyle(.checkbox)
             }
 
@@ -535,13 +555,13 @@ struct TranslationAssetSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("翻译资产").font(.subheadline).foregroundColor(.secondary)
+                Text(L("翻译资产", "Translation assets")).font(.subheadline).foregroundColor(.secondary)
                 Text(controller.assetStatusText).font(.caption).foregroundColor(.orange)
                 Spacer()
-                Button("检测") { controller.refreshAssetStatus() }
+                Button(L("检测", "Check")) { controller.refreshAssetStatus() }
                     .controlSize(.small)
                 if controller.assetStatusText.contains("未安装") {
-                    Button("安装翻译语言资产") { controller.installAssets() }
+                    Button(L("安装翻译语言资产", "Install translation language assets")) { controller.installAssets() }
                         .controlSize(.small)
                 }
             }

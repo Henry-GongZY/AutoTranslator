@@ -45,6 +45,7 @@
                             </Button>
                             <Button x:Name="PauseButton" Click="OnPauseClicked" IsEnabled="False" Content="暂停" Padding="16,10" />
                             <Button x:Name="StopButton" Click="OnStopClicked" IsEnabled="False" Content="停止" Padding="16,10" />
+                            <Button x:Name="ClearCaptionsButton" Click="OnClearCaptionsClicked" IsEnabled="False" Content="清空字幕" Padding="16,10" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
